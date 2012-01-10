@@ -1,0 +1,763 @@
+<?php
+
+/**
+* @file 
+* Support Rate.
+* @author Jeremy Andrews <jeremy@tag1consulting.com>
+* @package Support
+*/
+
+define('SUPPORT_RATES_HOURLY', 0);
+define('SUPPORT_RATES_DAILY', 1);
+define('SUPPORT_RATES_WEEKLY', 2);
+define('SUPPORT_RATES_MONTHLY', 3);
+
+define('SUPPORT_RATES_HOURS_PER_DAY', 8);
+define('SUPPORT_RATES_HOURS_PER_WEEK', 40);
+
+/**
+ * Implements hook_permission().
+ */
+function support_rates_permission() {
+  return array(
+    'administer support rates' => array(
+      'title' => t('Administer support rates'),
+    ),
+    'view rate description' => array(
+      'title' => t('View rate description'),
+    ),
+    'view billed rates' => array(
+      'title' => t('View billed rates'),
+    ),
+    'view earning rates' => array(
+      'title' => t('View earning rates'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function support_rates_menu() {
+  $items = array();
+
+  $items['support_rates/autocomplete'] = array(
+    'title' => 'Support rates user autocomplete',
+    'page callback' => 'support_rates_autocomplete',
+    'access callback' => 'user_access',
+    'access arguments' => array('administer support rates'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['admin/support/rates'] = array(
+    'title' => 'Billing rates',
+    'description' => 'Create and manage billing rate.',
+    'page callback' => 'support_rates_overview',
+    'access arguments' => array('administer support rates'),
+  );
+  $items['admin/support/rates/list'] = array(
+    'title' => 'List',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+  );
+  $items['admin/support/rates/add'] = array(
+    'title' => 'Add rate',
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 2,
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('support_rates_admin_form'),
+    'access arguments' => array('administer support rates'),
+  );
+  $items['admin/support/rates/%support_rates/edit'] = array(
+    'title' => 'Edit',
+    'type' => MENU_CALLBACK,
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('support_rates_admin_form', 3),
+    'access arguments' => array('administer support rates'),
+  );
+
+  return $items;
+}
+
+/**
+ */
+function support_rates_admin_form($form, &$form_state, $rate = array()) {
+  $form['description'] = array(
+    '#title' => t('Description'),
+    '#type' => 'textfield',
+    '#required' => TRUE,
+    '#maxlength' => 255,
+    '#default_value' => isset($rate->description) ? $rate->description : '',
+    '#description' => t('A brief description of this billing rate.  This description may appear on invoices.'),
+  );
+
+  $form['rate'] = array(
+    '#title' => t('Rate'),
+    '#type' => 'textfield',
+    '#maxlength' => 9,
+    '#size' => 8,
+    '#required' => TRUE,
+    '#default_value' => isset($rate->rate) ? number_format($rate->rate, 2) : '',
+    '#description' => t('The billing rate.'),
+  );
+
+  $form['period'] = array(
+    '#title' => t('Period'),
+    '#type' => t('select'),
+    '#options' => array(SUPPORT_RATES_HOURLY => t('Hourly'), SUPPORT_RATES_DAILY => t('Daily'), SUPPORT_RATES_WEEKLY => t('Weekly'), SUPPORT_RATES_MONTHLY => t('Monthly')),
+    '#default_value' => isset($rate->period) ? $rate->period : 0,
+    '#description' => t('The billing period.'),
+  );
+
+  $form['hours'] = array(
+    '#title' => t('Hours'),
+    '#type' => 'textfield',
+    '#maxlength' => 5,
+    '#size' => 8,
+    '#required' => TRUE,
+    '#default_value' => isset($rate->hours) ? $rate->hours : '',
+    '#description' => t('The number of hours included with this rate.  Set to 0 if no hours are included with this rate.'),
+  );
+
+  // TODO: Use javascript popup to set start and end dates
+  $form['start'] = array(
+    '#title' => t('Start'),
+    '#type' => 'textfield',
+    '#maxlength' => 8,
+    '#size' => 10,
+    '#required' => TRUE,
+    '#default_value' => isset($rate->start) ? $rate->start : '',
+    '#description' => t('The year, month and day the rate starts (ie 20110401).'),
+  );
+
+  // TODO: Use javascript popup to set start and end dates
+  $form['end'] = array(
+    '#title' => t('End'),
+    '#type' => 'textfield',
+    '#maxlength' => 8,
+    '#size' => 10,
+    '#required' => FALSE,
+    '#default_value' => isset($rate->end) ? $rate->end : '',
+    '#description' => t('The year, month and day the rate ends (ie 20110430).'),
+  );
+
+  $form['weight'] = array(
+    '#title' => t('Weight'),
+    '#type' => 'weight',
+    '#default_value' => isset($rate->weight) ? $rate->weight : 0,
+    '#description' => t('When multiple billing rates are available, the rate with the smallest (negative) weight will be selected as the default.'),
+  );
+
+  $clients = _support_clients_load();
+  if (!isset($clients)) {
+    drupal_set_message(t('You must !create a client before you can add a billing rate.', array('!create' => l(t('create and enable'), 'admin/support/clients/add'))), 'error', FALSE);
+    $clients = array();
+  }
+  $form['clids'] = array(
+    '#title' => t('Clients'),
+    '#type' => 'select',
+    '#options' => $clients,
+    '#multiple' => TRUE,
+    '#size' => count($clients) > 5 ? count($clients) : 5,
+    '#default_value' => isset($rate->clids) ? $rate->clids : array(),
+    '#description' => t('Select one or more clients that this rate can be applied to.'),
+  );
+
+  $users = array();
+  if (isset($rate->uids)) {
+    foreach ($rate->uids as $uid => $true) {
+      $account = user_load($uid);
+      $users[] = $account->name;
+    }
+  }
+  $form['users'] = array(
+    '#title' => t('Users'),
+    '#type' => 'textfield',
+    '#autocomplete_path' => 'support_rates/autocomplete',
+    '#default_value' => implode(', ', $users),
+    '#description' => t('Optionally limit this rate to one or more users.'),
+  );
+
+  $roles = user_roles();
+  $form['roles'] = array(
+    '#title' => t('Roles'),
+    '#type' => 'checkboxes',
+    '#options' => $roles,
+    '#size' => count($roles) > 5 ? count($roles) : 5,
+    '#default_value' => isset($rate->rids) ? $rate->rids : array(),
+    '#description' => t('Optionally limit this rate to one or more roles.'),
+  );
+
+  $form['#subid'] = isset($rate->subid) ? $rate->subid : NULL;
+
+  $form['submit'] = array(
+    '#value' => isset($rate->subid) ? t('Update rate') : t('Add rate'),
+    '#type' => 'submit',
+  );
+  if (isset($rate->subid)) {
+    $form['delete'] = array(
+      '#value' => t('Delete rate'),
+      '#type' => 'submit',
+    );
+    $form['cancel'] = array(
+      '#value' => l(t('Cancel'), 'admin/support/rates'),
+    );
+  }
+
+  return $form;
+}
+
+function support_rates_valid($clid = NULL, $uid = NULL, $timestamp = NULL) {
+  global $user;
+  $rates = array();
+  if (!isset($uid)) {
+    $uid = $user->uid;
+  }
+  $account = user_load($uid);
+  if (!isset($timestamp)) {
+    $timestamp = time();
+  }
+  // @todo: timestamps of this format have to be enforced
+  $timestamp = date('Ymd', $timestamp);
+
+  // Find all rates matching specified client.
+  if (isset($clid)) {
+    $result = db_query('SELECT sr.subid, sr.description FROM {support_rate} sr LEFT JOIN {support_rate_client} src ON sr.subid = src.subid WHERE sr.hours = 0 AND sr.period != :period AND (src.clid IS NULL OR src.clid = :clid) AND sr.start <= :timestamp AND (sr.end = 0 OR sr.end >= :timestamp) ORDER BY sr.weight ASC, sr.start DESC', array(':period' => SUPPORT_RATES_MONTHLY, ':clid' => $clid, ':timestamp' => $timestamp));
+  }
+  else {
+    $result = db_query('SELECT sr.subid, sr.description FROM {support_rate} sr LEFT JOIN {support_rate_client} src ON sr.subid = src.subid WHERE sr.hours = 0 AND sr.period != :period AND src.clid IS NULL AND sr.start <= :timestamp AND (sr.end = 0 OR sr.end >= :timestamp) ORDER BY sr.weight ASC, sr.start DESC', array(':period' => SUPPORT_RATES_MONTHLY, ':timestamp' => $timestamp));
+  }
+  foreach ($result as $row) {
+    $rates['client'][$row->subid] = $row->description;
+  }
+
+  if (!user_access('administer support rates', $account)) {
+    // Find all rates matching specified uid.
+    $result = db_query('SELECT sr.subid, sr.description FROM {support_rate} sr LEFT JOIN {support_rate_user} sru ON sr.subid = sru.subid WHERE (sru.uid IS NULL OR sru.uid = :uid) AND sr.start <= :timestamp AND (sr.end = 0 OR sr.end >= :timestamp) ORDER BY sr.weight ASC, sr.start DESC', array(':uid' => $uid, ':timestamp' => $timestamp));
+    foreach ($result as $row) {
+      $rates['user'][$row->subid] = $row->description;
+    }
+
+    // Find all rates user has access to.
+    $result = db_query('SELECT sr.subid, sr.description FROM {support_rate} sr LEFT JOIN {support_rate_role} srr ON sr.subid = srr.subid LEFT JOIN {users_roles} ur ON srr.rid = ur.rid WHERE (ur.uid = :uid OR ur.uid IS NULL) AND sr.start <= :timestamp AND (sr.end = 0 OR sr.end >= :timestamp) ORDER BY sr.weight ASC, sr.start DESC', array(':uid' => $uid, ':timestamp' => $timestamp));
+    foreach ($result as $row) {
+      $rates['role'][$row->subid] = $row->description;
+    }
+    $rates = array_intersect($rates['client'], $rates['user'], $rates['role']);
+  }
+  else {
+    $rates = $rates['client'];
+  }
+
+  if (empty($rates)) {
+    $rates[0] = t('Not billable');
+  }
+  return $rates;
+}
+
+function support_rates_default($rates, $uid = NULL, $timestamp = NULL) {
+  global $user;
+  $rids = array();
+  foreach ($rates as $rid => $role) {
+    $rids[$rid] = $rid;
+  }
+  if (!isset($uid)) {
+    $uid = $user->uid;
+  }
+  $account = user_load($uid);
+  if (!isset($timestamp)) {
+    $timestamp = time();
+  }
+  $default = (int)db_query('SELECT sr.subid FROM {support_rate} sr LEFT JOIN {support_rate_user} sru ON sr.subid = sru.subid WHERE sru.uid = :uid AND sr.subid IN (:subids) AND sr.start <= :timestamp AND (sr.end = 0 OR sr.end >= :timestamp) ORDER BY sr.weight ASC, sr.period ASC, sr.start DESC LIMIT 1', array(':uid' => $uid, ':subids' => $rids, ':timestamp' => $timestamp))->fetchField();
+  if (!$default) {
+    $default = (int)db_query('SELECT sr.subid FROM {support_rate} sr LEFT JOIN {support_rate_user} sru ON sr.subid = sru.subid WHERE sru.uid IS NULL AND sr.subid IN (:subids) AND sr.start <= :timestamp AND (sr.end = 0 OR sr.end >= :timestamp) ORDER BY sr.weight, sr.period ASC, sr.start DESC LIMIT 1', array(':subids' => $rids, ':timestamp' => $timestamp))->fetchField();
+  }
+
+  return $default;
+}
+
+function support_rates_support_timer_display_alter(&$form, $id) {
+  global $user;
+
+  if (isset($id['cid'])) {
+    $clid = db_query('SELECT client FROM {support_ticket_comment} WHERE cid = :cid', array(':cid' => $id['cid']))->fetchField();
+    $default = db_query("SELECT subid FROM {support_rate_ticket} WHERE type = 'comment' AND id = :cid", array(':cid' => $id['cid']))->fetchField();
+  }
+  else if (isset($id['nid'])) {
+    $clid = db_query('SELECT client FROM {support_ticket} WHERE nid = :nid', array(':nid' => $id['nid']))->fetchField();
+    $default = db_query("SELECT subid FROM {support_rate_ticket} WHERE type = 'node' AND id = :nid", array(':nid' => $id['nid']))->fetchField();
+  }
+  $rates = support_rates_valid($clid, $user->uid);
+  $old = $form;
+  $form = array();
+  foreach ($old['timer'] as $key => $values) {
+    if ($key == 'timer_date') {
+      $form['timer']['rate'] = array(
+        '#type' => 'select',
+        '#options' => $rates,
+        '#default_value' => $default,
+        '#title' => t('Rate'),
+        '#prefix' => '&nbsp;&nbsp;',
+      );
+    }
+    $form['timer'][$key] = $values;
+  }
+}
+
+function support_rates_support_timer_add_alter(&$form, $edit) {
+  global $user;
+
+  $clid = isset($edit['support']['client']['#default_value']) ? $edit['support']['client']['#default_value'] : _support_current_client();
+  $rates = support_rates_valid($clid, $user->uid);
+
+  // Insert rate field where we want it inside the form.
+  $old = $form;
+  $form = array();
+  foreach ($old['timer'] as $key => $values) {
+    if ($key == 'timer_date') {
+      $form['timer']['rate'] = array(
+        '#type' => 'select',
+        '#options' => $rates,
+        '#default_value' => support_rates_default($rates, $user->uid),
+        '#title' => t('Rate'),
+        '#prefix' => '&nbsp;&nbsp;',
+      );
+    }
+    $form['timer'][$key] = $values;
+  }
+}
+
+/**
+ * Implements hook_node_view().
+ */
+function support_rates_node_view($node, $view_mode, $langcode) {
+  if ($node->type == 'support_ticket' && user_access('view rate description')) {
+    if ($description = support_rates_load_description('node', $node->nid)) {
+      $node->content['support-rates'] = array(
+        '#value' => "<div class='support-priority'>Rate: $description</div>",
+        '#weight' => -1,
+      );
+    }
+  }
+}
+
+/**
+ * Implements hook_node_insert().
+ */
+function support_rates_node_insert($node) {
+  return support_rates_node_update($node);
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function support_rates_node_update($node) {
+  if ($node->type == 'support_ticket') {
+    if (!isset($node->rate)) {
+      db_delete('support_rate_ticket')->condition('type', 'node')->condition('id', $node->nid)->execute();
+    }
+    else {
+      db_merge('support_rate_ticket')
+        ->key(array('type' => 'node', 'id' => $node->nid))
+        ->fields(array(
+          'subid' => $node->rate,
+        ))
+        ->execute();
+    }
+  }
+}
+
+/**
+ * Implements hook_node_delete().
+ */
+function support_rates_node_delete($node) {
+  if ($node->type == 'support_ticket') {
+    db_delete('support_rate_ticket')
+      ->condition('type', 'node')
+      ->condition('id', $node->nid)
+      ->execute();
+  }
+}
+
+/**
+ * Implements hook_comment_view().
+ */
+function support_rates_comment_view($comment, $view_mode, $langcode) {
+  if ($comment->node_type == 'comment_node_support_ticket' && user_access('view rate description')) {
+    if ($description = support_rates_load_description('comment', $comment->cid)) {
+      $comment->content['support']['rate'] = array(
+        '#markup' => '<div class="support-priority">' . t('Rate') . ': ' . check_plain($description) . '</div>',
+      );
+      // Make sure the weight is correct.
+      $comment->content['support']['#weight'] = -1;
+    }
+  }
+}
+
+/**
+ * Implements hook_comment_insert().
+ */
+function support_rates_comment_insert($comment) {
+  return support_rates_comment_update($comment);
+}
+
+/**
+ * Implements hook_comment_update().
+ */
+function support_rates_comment_update($comment) {
+  if ($comment->node_type == 'comment_node_support_ticket') {
+    if (!isset($comment->rate)) {
+      db_delete('support_rate_ticket')->condition('type', 'comment')->condition('id', $comment->cid)->execute();
+    }
+    else {
+      db_merge('support_rate_ticket')
+        ->key(array('type' => 'comment', 'id' => $comment->cid))
+        ->fields(array(
+          'subid' => $comment->rate,
+        ))
+        ->execute();
+    }
+  }
+}
+
+function support_rates_autocomplete($string = '') {
+  // Multiple users can be specified in a comma-separated list, we only
+  // autocomplete the last user in the list.
+  $users = drupal_explode_tags($string);
+  $last_string = trim(array_pop($users));
+  $matches = array();
+  if (!empty($last_string)) {
+    // FIXME: This won't match the default authenticated user role
+    $result = db_query('SELECT rid FROM {role_permission} WHERE module = :module AND permission IN (:permissions)', array(':module' => 'support', ':permissions' => array('create tickets', 'administer support')));
+    foreach ($result as $role) {
+      $roles[$role->rid] = $role->rid;
+    }
+    if (!empty($roles)) {
+      $query = db_select('users', 'u');
+      $query->leftJoin('users_roles', 'r', 'u.uid = r.uid');
+      $query
+        ->condition('r.rid', array_keys($roles), 'IN')
+        ->condition('u.status', 1)
+        ->condition('u.name', db_like($last_string) . '%', 'LIKE')
+        ->range(0, 10)
+        ->fields('u', array('name'));
+      $result = $query->execute();
+    }
+    $prefix = count($users) ? implode(', ', $users) .', ': '';
+
+    foreach ($result as $account) {
+      $a = $account->name;
+      $matches[$prefix . $a] = check_plain($account->name);
+    }
+  }
+
+  drupal_json_output($matches);
+}
+
+function support_rates_admin_form_submit($form, &$form_state) {
+  if ($form_state['clicked_button']['#value'] == t('Delete rate')) {
+    db_delete('support_rate')->condition('subid', $form['#subid'])->execute();
+    db_delete('support_rate_client')->condition('subid', $form['#subid'])->execute();
+    db_delete('support_rate_user')->condition('subid', $form['#subid'])->execute();
+    db_delete('support_rate_role')->condition('subid', $form['#subid'])->execute();
+    drupal_set_message(t('Rate %description deleted.', array('%description' => $form_state['values']['description'])));
+  }
+  else if ($form_state['clicked_button']['#value'] == t('Update rate')) {
+    db_update('support_rate')
+      ->fields(array(
+        'description' => $form_state['values']['description'],
+        'rate' => $form_state['values']['rate'],
+        'hours' => $form_state['values']['hours'],
+        'start' => $form_state['values']['start'],
+        'end' => $form_state['values']['end'],
+        'period' => $form_state['values']['period'],
+        'weight' => $form_state['values']['weight'],
+      ))
+      ->condition('subid', $form['#subid'])
+      ->execute();
+    db_delete('support_rate_client')->condition('subid', $form['#subid'])->execute();
+    foreach ($form_state['values']['clids'] as $clid) {
+      db_insert('support_rate_client')->fields(array(
+        'subid' => $form['#subid'],
+        'clid' => $clid,
+      ))->execute();
+    }
+    db_delete('support_rate_user')->condition('subid', $form['#subid'])->execute();
+    $names = explode(',', $form_state['values']['users']);
+    foreach ($names as $name) {
+      if ($uid = db_query('SELECT uid FROM {users} WHERE name = :name', array(':name' => trim($name)))->fetchField()) {
+        db_insert('support_rate_user')->fields(array(
+          'subid' => $form['#subid'],
+          'uid' => $uid,
+        ))->execute();
+      }
+    }
+    db_delete('support_rate_role')->condition('subid', $form['#subid'])->execute();
+    $roles = array_filter($form_state['values']['roles']);
+    foreach (array_keys($roles) as $rid) {
+      db_insert('support_rate_role')->fields(array(
+        'subid' => $form['#subid'],
+        'rid' => $rid,
+      ))->execute();
+    }
+    drupal_set_message(t('Rate %description updated.', array('%description' => $form_state['values']['description'])));
+  }
+  else {
+    $query = db_insert('support_rate')->fields(array(
+      'description' => $form_state['values']['description'],
+      'rate' => $form_state['values']['rate'],
+      'hours' => $form_state['values']['hours'],
+      'start' => $form_state['values']['start'],
+      'end' => $form_state['values']['end'],
+      'period' => $form_state['values']['period'],
+      'weight' => $form_state['values']['weight'],
+    ));
+    $subid = $query->execute();
+    foreach ($form_state['values']['clids'] as $clid) {
+      db_insert('support_rate_client')->fields(array(
+        'subid' => $subid,
+        'clid' => $clid,
+      ))->execute();
+    }
+    $names = explode(',', $form_state['values']['users']);
+    foreach ($names as $name) {
+      if ($uid = db_query('SELECT uid FROM {users} WHERE name = :name', array(':name' => trim($name)))->fetchField()) {
+        db_insert('support_rate_user')->fields(array(
+          'subid' => $subid,
+          'uid' => $uid,
+        ))->execute();
+      }
+    }
+    foreach ($form_state['values']['roles'] as $rid) {
+      db_insert('support_rate_role')->fields(array(
+        'subid' => $subid,
+        'rid' => $rid,
+      ))->execute();
+    }
+    drupal_set_message(t('Rate %description added.', array('%description' => $form_state['values']['description'])));
+  }
+  drupal_goto('admin/support/rates');
+}
+
+function support_rates_overview() {
+  $rows = array();
+
+  $header = array(
+    array('data' => t('Description'), 'field' => 'sr.description'),
+    array('data' => t('Clients')),
+    array('data' => t('Users')),
+    array('data' => t('Rate'), 'field' => 'sr.rate'),
+    array('data' => t('Period'), 'field' => 'sr.period'),
+    array('data' => t('Hours'), 'field' => 'sr.hours'),
+    array('data' => t('Start'), 'field' => 'sr.start', 'sort' => 'desc'),
+    array('data' => t('End'), 'field' => 'sr.end'),
+    array('data' => t('Weight'), 'field' => 'sr.weight'),
+    array('data' => t('Options')),
+  );
+  $query = db_select('support_rate', 'sr')
+    ->extend('PagerDefault')
+    ->extend('TableSort')
+    ->orderByHeader($header);
+  $query->fields('sr', array('subid', 'description', 'period', 'rate', 'hours', 'start', 'end', 'weight'));
+  $query->limit(50);
+  $result = $query->execute();
+  foreach ($result as $rate) {
+    $options = l(t('edit'), "admin/support/rates/$rate->subid/edit");
+
+    $clients = array();
+    $result2 = db_query('SELECT src.clid, sc.name FROM {support_rate_client} src LEFT JOIN {support_client} sc ON src.clid = sc.clid WHERE src.subid = :subid', array(':subid' => $rate->subid));
+    foreach ($result2 as $client) {
+      $clients[] = check_plain($client->name);
+    }
+    if (empty($clients)) {
+      $clients[] = '<em>'. t('All clients') .'</em>';
+    }
+
+    $users = array();
+    $result2 = db_query('SELECT sru.uid, u.name FROM {support_rate_user} sru LEFT JOIN {users} u ON sru.uid = u.uid WHERE sru.subid = :subid', array(':subid' => $rate->subid));
+    foreach ($result2 as $user) {
+      $users[] = check_plain($user->name);
+    }
+    if (empty($users)) {
+      $users[] = '<em>'. t('All users') .'</em>';
+    }
+
+    $rows[] = array(
+      truncate_utf8(check_plain($rate->description), 52, TRUE, TRUE),
+      implode(', ', $clients),
+      implode(', ', $users),
+      '$' . number_format($rate->rate, 2),
+      _support_rates_period($rate->period),
+      empty($rate->hours) ? '<em>'. t('none') . '</em>' : number_format($rate->hours, 1),
+      empty($rate->start) ? '<em>'. t('none') .'</em>' : format_date(strtotime($rate->start), 'small'),
+      empty($rate->end) ? '<em>'. t('none') .'</em>' : format_date(strtotime($rate->end), 'small'),
+      $rate->weight,
+      $options,
+    );
+  }
+  if (empty($rows)) {
+    drupal_set_message(t('There are currently no billing rates defined.'));
+  }
+  return theme('table', array('header' => $header, 'rows' => $rows));
+}
+
+function _support_rates_client_users($client) {
+  $users = $roles = array();
+  $result = db_query('SELECT rid FROM {role_permission} WHERE permission = :user OR permission = :admin', array(':user' => "access $client->name tickets", ':admin' => 'administer support'));
+  foreach ($result as $role) {
+    $roles[$role->rid] = $role->rid;
+  }
+  if (count($roles)) {
+    $query = db_select('users', 'u');
+    $query->join('users_roles', 'r', 'u.uid = r.uid');
+    $query
+      ->fields('u', array('name', 'uid'))
+      ->condition('r.rid', $roles, 'IN')
+      ->condition('u.status', 1);
+    $result = $query->execute();
+    foreach ($result as $user) {
+      $users[$user->uid] = $user->name;
+    }
+  }
+  return $users;
+}
+
+function support_rates_submit($form, &$form_state) {
+  $clients = db_query('SELECT clid, name FROM {support_client} WHERE status = 1');
+  foreach ($clients as $client) {
+    $users = _support_rates_client_users($client);
+    $users[0] = 'default';
+    foreach ($users as $uid => $name) {
+      // Set hourly rates
+      if (is_numeric($form_state['values']["{$client->clid}_hourly_rates_{$uid}"])) {
+        db_merge('support_client_rates')
+          ->key(array(
+            'clid' => $client->clid,
+            'uid' => $uid,
+            'period' => SUPPORT_RATES_HOURLY,
+          ))
+          ->fields(array(
+            'rate' => $form_state['values']["{$client->clid}_hourly_rates_{$uid}"],
+          ))
+          ->execute();
+      }
+      else {
+        db_delete('support_client_rates')
+          ->condition('clid', $client->clid)
+          ->condition('uid', $uid)
+          ->condition('period', SUPPORT_RATES_HOURLY)
+          ->execute();
+      }
+      // Set daily rates
+      if (is_numeric($form_state['values']["{$client->clid}_daily_rates_{$uid}"])) {
+        db_merge('support_client_rates')
+          ->key(array(
+            'clid' => $client->clid,
+            'uid' => $uid,
+            'period' => SUPPORT_RATES_DAILY,
+          ))
+          ->fields(array(
+            'rate' => $form_state['values']["{$client->clid}_daily_rates_{$uid}"],
+          ))
+          ->execute();
+      }
+      else {
+        db_delete('support_client_rates')
+          ->condition('clid', $client->clid)
+          ->condition('uid', $uid)
+          ->condition('period', SUPPORT_RATES_DAILY)
+          ->execute();
+      }
+    }
+  }
+}
+
+/**
+ * Load rate out of the database.
+ */
+function support_rates_load_rate($type, $id) {
+  $rate = db_query('SELECT sr.rate, sr.period FROM {support_rate_ticket} srt LEFT JOIN {support_rate} sr ON srt.subid = sr.subid WHERE srt.type = :type AND srt.id = :id', array(':type' => $type, ':id' => $id))->fetch();
+  if (is_object($rate)) {
+    switch ($rate->period) {
+      case SUPPORT_RATES_HOURLY:
+      case SUPPORT_RATES_MONTHLY:
+        $rate = $rate->rate;
+        break;
+      case SUPPORT_RATES_DAILY:
+        $rate = $rate->rate / SUPPORT_RATES_HOURS_PER_DAY;
+        break;
+      case SUPPORT_RATES_WEEKLY:
+        $rate = $rate->rate / SUPPORT_RATES_HOURS_PER_WEEK;
+        break;
+      default:
+        $rate = 0;
+        break;
+    }
+  }
+  else {
+    $rate = 0;
+  }
+  return (float)$rate;
+}
+
+/**
+ * Load rate out of the database.
+ */
+function support_rates_load_description($type, $id) {
+  return db_query('SELECT sr.description FROM {support_rate_ticket} srt LEFT JOIN {support_rate} sr ON srt.subid = sr.subid WHERE srt.type = :type AND srt.id = :id', array(':type' => $type, ':id' => $id))->fetchField();
+}
+
+function support_rates_load($subid) {
+  static $rates = array();
+
+  if (!isset($rates[$subid])) {
+    $rate = db_query('SELECT * FROM {support_rate} WHERE subid = :subid', array(':subid' => $subid))->fetch();
+    $result = db_query('SELECT clid FROM {support_rate_client} WHERE subid = :subid', array(':subid' => $subid));
+    // Load associated clients
+    $rate->clids = array();
+    foreach ($result as $client) {
+      $rate->clids[] = $client->clid;
+    }
+    // Load associated users
+    $result = db_query('SELECT uid FROM {support_rate_user} WHERE subid = :subid', array(':subid' => $subid));
+    $rate->uids = array();
+    foreach ($result as $account) {
+      $rate->uids[$account->uid] = 1;
+    }
+    // Load associated roles
+    $result = db_query('SELECT rid FROM {support_rate_role} WHERE subid = :subid', array(':subid' => $subid));
+    $rate->rids = array();
+    foreach ($result as $role) {
+      $rate->rids[$role->rid] = $role->rid;
+    }
+
+    drupal_alter('support_rates_load', $rate);
+    $rates[$subid] = $rate;
+  }
+  return $rates[$subid];
+}
+
+function support_rates_earned($account, $client, $rate, $time, $month) {
+  $earned_rate = variable_get('support_rates_earned_rate', .8);
+  $values = array(
+    'rate' => $rate,
+    'time' => $time,
+    'earned_rate' => $earned_rate,
+    'account' => $account,
+    'client' => $client,
+    'month'=> $month,
+  );
+  drupal_alter('support_rates_earned', $values);
+  return ($values['rate'] * $values['time'] * $values['earned_rate']);
+}
+
+function _support_rates_period($period) {
+  switch ($period) {
+    case SUPPORT_RATES_HOURLY:
+      return t('Hourly');
+    case SUPPORT_RATES_DAILY:
+      return t('Daily');
+    case SUPPORT_RATES_WEEKLY:
+      return t('Weekly');
+    case SUPPORT_RATES_MONTHLY:
+      return t('Monthly');
+  }
+}

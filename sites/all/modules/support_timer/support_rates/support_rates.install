@@ -1,0 +1,552 @@
+<?php
+
+/**
+ * Helpdesk / support ticket tracking system rates database schema.
+ * Copyright (c) 2010 Tag1 Consulting, Inc <jeremy@tag1consulting.com>.
+ */
+
+/**
+ * Support database schema definition.
+ */
+function support_rates_schema() {
+  $schema = array();
+  $schema['support_rate'] = array(
+    'description' => 'Stores information about support client rates.',
+    'fields' => array(
+      'subid' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+      ),
+      'description' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'period' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'rate' => array(
+        'type' => 'float',
+        'not null' => FALSE,
+        'default' => 0.0,
+      ),
+      'weight' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'start' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'end' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'hours' => array(
+        'type' => 'float',
+        'not null' => FALSE,
+        'default' => 0.0,
+      ),
+    ),
+    'primary key' => array('subid', 'period', 'start', 'end', 'weight', 'rate', 'hours'),
+  );
+  $schema['support_rate_client'] = array(
+    'description' => 'Stores information about support client rates.',
+    'fields' => array(
+      'subid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'clid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('subid', 'clid'),
+  );
+  $schema['support_rate_user'] = array(
+    'description' => 'Stores information about support user rates.',
+    'fields' => array(
+      'subid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('subid', 'uid'),
+  );
+  $schema['support_rate_role'] = array(
+    'description' => 'Stores information about support role rates.',
+    'fields' => array(
+      'subid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'rid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('subid', 'rid'),
+  );
+  $schema['support_rate_ticket'] = array(
+    'description' => 'Stores per-ticket rates.',
+    'fields' => array(
+      'trid' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+      ),
+      'type' => array(
+        'type' => 'varchar',
+        'length' => 16,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'subid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('trid'),
+    'unique keys' => array('rate' => array('type', 'id', 'subid')),
+  );
+  return $schema;
+}
+
+/**
+ * Install support database schema.
+ */
+function support_rates_install() {
+  // Add 'Not billable' default billing rate for all clients and all users.
+  $query = db_insert('support_rate')->fields(array(
+    'description' => t('Not billable'),
+    'rate' => 0,
+    'period' => 0,
+    'hours' => 0,
+    'start' => 0,
+    'end' => 0,
+  ));
+  $subid = $query->execute();
+  db_insert('support_rate_client')->fields(array('subid' => $subid, 'clid' => 0))->execute();
+  db_insert('support_rate_user')->fields(array('subid' => $subid, 'uid' => 0))->execute();
+}
+
+/**
+ * Add new 'period' field support different rate periods (hourly, daily, etc)
+ * Periods are defined in support_rates.module (ie SUPPORT_RATES_HOURLY).
+ */
+function support_rates_update_6001() {
+  db_add_field('support_client_rates', 'period',
+    array(
+      'type' => 'int',
+      'size' => 'tiny',
+      'not null' => TRUE,
+      'default' => 0, // daily
+    )
+  );
+  // Add a temporary index on the clid-serial column which must always have an
+  // index.
+  db_add_index('support_client_rates', 'clid', array('clid'));
+  // Now we can drop the primary key.
+  db_drop_primary_key('support_client_rates');
+  // All of this so we can recreate the primary key, adding 'period' to it.
+  db_add_primary_key('support_client_rates', array('clid', 'uid', 'period'));
+  // We no longer need the temporary index on the clid column.
+  db_drop_index('support_client_rates', 'clid');
+}
+
+/**
+ * Add new support_subscription_rates table.
+ */
+function support_rates_update_6002() {
+  $schema['support_subscription_rates'] = array(
+    'description' => 'Stores information about support client subscription rates.',
+    'fields' => array(
+      'subid' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+      ),
+      'clid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'description' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'rate' => array(
+        'type' => 'float',
+        'not null' => FALSE,
+        'default' => 0.0,
+      ),
+      'hours' => array(
+        'type' => 'float',
+        'not null' => FALSE,
+        'default' => 0.0,
+      ),
+    ),
+    'primary key' => array('subid', 'clid', 'uid', 'rate'),
+  );
+  db_create_table('support_subscription_rates', $schema['support_subscription_rates']);
+
+  // We've added new menus, flush caches and rebuild menus.
+  drupal_flush_all_caches();
+  menu_rebuild();
+}
+
+/**
+ * Add date ranges to support_subscription_rates table.
+ */
+function support_rates_update_6003() {
+  db_add_field('support_subscription_rates', 'start',
+    array(
+      'type' => 'int',
+      'not null' => TRUE,
+      'default' => 0,
+    )
+  );
+  db_add_field('support_subscription_rates', 'end',
+    array(
+      'type' => 'int',
+      'not null' => TRUE,
+      'default' => 0,
+    )
+  );
+
+  // We need a temporary index so we can drop the primary key
+  db_add_index('support_subscription_rates', 'subid', array('subid'));
+  // Now we can drop the primary key.
+  db_drop_primary_key('support_subscription_rates');
+  // All of this so we can recreate the primary key, adding 'period' to it.
+  db_add_primary_key('support_subscription_rates', array('subid', 'clid', 'rate', 'start', 'end'));
+  // We no longer need the temporary index on the subid column.
+  db_drop_index('support_subscription_rates', 'subid');
+}
+
+function support_timer_is_days($hours, $clid) {
+  if (module_exists('support_rates') &&
+      !($hours % SUPPORT_RATES_HOURS_PER_DAY) &&
+       $hours == round($hours) &&
+       support_rates_get($clid, $uid, SUPPORT_RATES_DAILY)) {
+    return TRUE;
+  }
+  // By default, support_timer is only tracking hours:minutes:seconds
+  return FALSE;
+}
+
+function support_rates_get($clid, $uid, $period = SUPPORT_RATES_HOURLY, $date = NULL, $subid = FALSE) {
+  $account = user_load($uid);
+  if (user_access('track time spent', $account)) {
+    $rate = db_query('SELECT sr.subid, rate FROM {support_rate} sr LEFT JOIN {support_rate_client} src ON sr.subid = src.subid LEFT JOIN {support_rate_user} sru ON sr.subid = sru.subid WHERE src.clid = :clid AND sru.uid = :uid AND sr.period = :period', array(':clid' => $clid, ':uid' => $uid, ':period' => $period))->fetch();
+    if (!$rate) {
+      $rate = db_query('SELECT sr.subid, rate FROM {support_rate} sr LEFT JOIN {support_rate_client} src ON sr.subid = src.subid LEFT JOIN {support_rate_user} sru ON sr.subid = sru.subid WHERE src.clid = :clid AND sr.period = :period', array(':clid' => $clid, ':period' => $period))->fetch();
+    }
+    if ($subid) {
+      return $rate->subid;
+    }
+    else {
+      if ($period == SUPPORT_RATES_DAILY) {
+        $rate->rate = $rate->rate / SUPPORT_RATES_HOURS_PER_DAY;
+      }
+      return $rate->rate;
+    }
+  }
+}
+
+/**
+ * Move all rates data into single support_rate and support_rate_client tables.
+ */
+function support_rates_update_6004() {
+  // Rename the base table.
+  db_rename_table('support_subscription_rates', 'support_rate');
+
+  db_add_field('support_rate', 'period',
+    array(
+      'type' => 'int',
+      'size' => 'tiny',
+      'not null' => TRUE,
+      'default' => SUPPORT_RATES_HOURLY,
+    )
+  );
+  db_add_field('support_rate', 'weight',
+    array(
+      'type' => 'int',
+      'not null' => TRUE,
+      'default' => 0,
+    )
+  );
+
+  // Update period field on existing monthly rates to use define value.
+  db_update('support_rate')
+    ->fields(array(
+      'period' => SUPPORT_RATES_MONTHLY,
+    ))
+    ->expression('start', 'start * 100')
+    ->expression('end', 'end * 100')
+    ->execute();
+  $result = db_query('SELECT start, end, subid FROM {support_rate}');
+  foreach ($result as $rate) {
+    $query = db_update('support_rate')
+      ->condition('subid', $rate->subid);
+    if ($rate->start) {
+      $query->expression('start', 'start + 1');
+    }
+    if ($rate->end) {
+      $query->expression('end', 'end + 31');
+    }
+    $query->execute();
+  }
+
+  // Convert old rate data into new format.
+  $result = db_query('SELECT clid, uid, rate, period FROM {support_client_rates}');
+  foreach ($result as $row) {
+    $client = support_client_load($row->clid);
+    if ($row->uid) {
+      $account = user_load($row->uid);
+      $type = $account->name;
+      $weight = -2;
+    }
+    else {
+      $type = t('default');
+      $weight = 0;
+    }
+    if ($row->period) {
+      $type .= t(' daily');
+    }
+    else {
+      $type .= t(' hourly');
+      $weight--;
+    }
+    $description = t('!client !type rate', array('!client' => $client->name, '!type' => $type));
+    $start = format_date(db_query('SELECT MIN(n.created) FROM {node} n LEFT JOIN {support_ticket} s ON n.nid = s.nid WHERE client = :client', array(':client' => $row->clid))->fetchField(), 'custom', 'Ymd', variable_get('date_default_timezone', 0));
+    db_insert('support_rate')->fields(array(
+      'uid' => $row->uid,
+      'clid' => $row->clid,
+      'description' => $description,
+      'rate' => $row->rate,
+      'period' => $row->period,
+      'hours' => 0,
+      'start' => $start,
+      'end' => 0,
+      'weight' => $weight,
+    ))->execute();
+  }
+
+  // Remove the no-longer used support_client_rates table
+  db_drop_table('support_client_rates');
+
+  $no_rate = t('Not billable');
+  db_insert('support_rate')->fields(array(
+    'uid' => 0,
+    'clid' => 0,
+    'description' => $no_rate,
+    'rate' => 0,
+    'period' => 0,
+    'hours' => 0,
+    'start' => 0,
+    'end' => 0,
+    'weight' => 10
+  ))->execute();
+
+  // Add client and user tables.
+  $schema = array();
+  $schema['support_rate_client'] = array(
+    'description' => 'Stores information about support client rates.',
+    'fields' => array(
+      'subid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'clid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('subid', 'clid'),
+  );
+  $schema['support_rate_user'] = array(
+    'description' => 'Stores information about support user rates.',
+    'fields' => array(
+      'subid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('subid', 'uid'),
+  );
+  $schema['support_rate_role'] = array(
+    'description' => 'Stores information about support role rates.',
+    'fields' => array(
+      'subid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'rid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('subid', 'rid'),
+  );
+  $schema['support_rate_ticket'] = array(
+    'description' => 'Stores per-ticket rates.',
+    'fields' => array(
+      'trid' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+      ),
+      'type' => array(
+        'type' => 'varchar',
+        'length' => 16,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'subid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('trid'),
+    'unique keys' => array('rate' => array('type', 'id', 'subid')),
+  );
+  db_create_table('support_rate_client', $schema['support_rate_client']);
+  db_create_table('support_rate_user', $schema['support_rate_user']);
+  db_create_table('support_rate_role', $schema['support_rate_role']);
+  db_create_table('support_rate_ticket', $schema['support_rate_ticket']);
+
+  // Move client, user and role specific data into their own tables.
+  $result = db_query('SELECT subid, clid, uid FROM {support_rate}');
+  foreach ($result as $row) {
+    if ($row->clid) {
+      db_insert('support_rate_client')->fields(array('subid' => $row->subid, 'clid' => $row->clid))->execute();
+      $client = db_query('SELECT name FROM {support_client} WHERE clid = :clid', array(':clid' => $row->clid))->fetchField();
+      // retrieve all roles with permission to access these tickets
+      $result2 = db_query("SELECT rid FROM {role_permission} WHERE permission = 'administer support' OR permission = :access", array(':access' => "access $client tickets"));
+    }
+    else {
+      $result2 = db_query("SELECT rid FROM {role_permission} WHERE permission = 'administer support'");
+    }
+    foreach ($result2 as $role) {
+      db_insert('support_rate_role')->fields(array('subid' => $row->subid, 'rid' => $role->rid))->execute();
+    }
+    if ($row->uid) {
+      db_insert('support_rate_user')->fields(array('subid' => $row->subid, 'uid' => $row->uid))->execute();
+    }
+  }
+
+  $result = db_query('SELECT st.nid, st.client, stt.date, stt.time, n.uid FROM {support_ticket} st LEFT JOIN {support_ticket_timer} stt ON st.nid = stt.nid LEFT JOIN {node} n ON st.nid = n.nid');
+  foreach ($result as $ticket) {
+    if (support_timer_is_days(support_timer_to_hours($ticket->time), $ticket->client)) {
+      $period = SUPPORT_RATES_DAILY;
+    }
+    else {
+      $period = SUPPORT_RATES_HOURLY;
+    }
+    if ($subid = support_rates_get($ticket->client, $ticket->uid, $period, strtotime($ticket->date), TRUE)) {
+      db_insert('support_rate_ticket')->fields(array(
+        'type' => 'node',
+        'id' => $ticket->nid,
+        'subid' => $subid,
+      ))->execute();
+    }
+  }
+  $result = db_query('SELECT stc.cid, stc.client, stct.date, stct.time, c.uid FROM {support_ticket_comment} stc LEFT JOIN {support_ticket_comment_timer} stct ON stc.cid = stct.cid LEFT JOIN {comments} c ON stc.cid = c.cid');
+  foreach ($result as $ticket) {
+    if (support_timer_is_days(support_timer_to_hours($ticket->time), $ticket->client)) {
+      $period = SUPPORT_RATES_DAILY;
+    }
+    else {
+      $period = SUPPORT_RATES_HOURLY;
+    }
+    if ($subid = support_rates_get($ticket->client, $ticket->uid, $period, strtotime($ticket->date), TRUE)) {
+      db_insert('support_rate_ticket')->fields(array(
+        'type' => 'comment',
+        'id' => $ticket->cid,
+        'subid' => $subid,
+      ))->execute();
+    }
+  }
+
+  // We need a temporary index so we can drop the primary key
+  db_add_index('support_rate', 'subid', array('subid'));
+  // Now we can drop the primary key.
+  db_drop_primary_key('support_rate');
+  // All of this so we can recreate the primary key, adding 'period' to it.
+  db_add_primary_key('support_rate', array('subid', 'period', 'start', 'end', 'weight', 'rate', 'hours'));
+  // We no longer need the temporary index on the subid column.
+  db_drop_index('support_rate', 'subid');
+  // We can now remove the old clid field.
+  db_drop_field('support_rate', 'clid');
+  // We can now remove the old uid field.
+  db_drop_field('support_rate', 'uid');
+
+  // All done; flush caches and rebuild menus.
+  drupal_flush_all_caches();
+  menu_rebuild();
+}

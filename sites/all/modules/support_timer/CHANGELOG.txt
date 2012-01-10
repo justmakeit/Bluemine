@@ -1,0 +1,113 @@
+7.x changelog
+-------------
+September 20, 2011
+ - Fixing warnings in the client timer report.
+ - Tagged 7.x-1.0-beta1.
+
+September 14, 2011
+ - Pushing a huge 7.x update.
+ - Removed support_plan module (it has been renamed to support_pm and is now
+   part of the main support project).
+
+May 7, 2011
+ - Changing support_timer_support_mailcmd_command_alter() to use new format imposed by drupal 7 alter limitations.
+
+May 3, 2011
+ - Porting support_plan to D7.
+
+April 30, 2011
+ - Further Drupal 7 fixes.
+ - Merging in changes from 6.x-1.x, I accidentally forked from the wrong point yesterday.
+
+April 29, 2011
+ - Drupal 7 port.
+
+6.x changelog
+-------------
+September 20, 2011
+ - Bug #1285136: Don't save blank time punches when submitting by email or submitting with no time submission permissions.
+
+September 13
+ - Bug #1277628: Fix installation error with support_rates module.
+
+September 12
+ - Feature #1276654: Change 'Pause' button text to say 'Resume' when timer is
+   paused.
+
+September 8, 2011 (6.x-1.3)
+ - Feature #1247840: Filter updates with 00:00:00 time and no summary from
+   user and client timer reports. Also allows user reports to be altered.
+
+September 6, 2011
+ - Remove a spurious user_load() call that generates warnings.
+
+June 27, 2011
+ - Allow client reports to be altered.
+ - Allow filtering of timer reports by uid (no UI yet)
+
+June 24, 2011
+ - Removed support_plan module (it has been renamed to support_pm and is now
+   part of the main support project).
+
+June 11, 2011
+ - Feature #1185548: enhanced billing rates, allows multiple billing-rates per
+   client:  hourly, daily, weekly and monthly (subscription) rates.  Provides
+   best-effort upgrade path.
+
+May 3, 2011
+ - Added support for 60-80% column on user_timer_report displays.  Needs
+   documentation and more flexible configuration.
+
+May 3, 2011
+ - Fixed theme issue that was causing spurious empty table cells to be output on the support plan edit page.
+
+April 30, 2011
+ - Committed yesterday's fixes to the wrong branch, merging them into the correct branch.
+
+April 29, 2011
+ - Juggle around check_plain() calls in support_rates to follow best security practice.
+
+April 19th, 2011
+ - Introduce hook_support_timer_user_report_access allowing contrib modules to
+   override user_report_access at finer granularity.
+
+April 15th, 2011
+ - Initial support for setting start/stop months for monthly subscriptions.
+
+March 5th, 2011
+ - support_rates.module
+    o Remove limit query to ensure all users show up for all clients
+
+March 3rd, 2011
+ - Fix invoices for sub-clients to use proper billing rate.
+
+March 1st, 2011
+ - Feature #1077876: monthly subscription billing (pre-sell/retainer hours)
+
+February 20th, 2011
+ - tagged 6.x-1.1 release
+
+January 3rd, 2011
+ - support_timer.module
+    o Fix pasto that was causing a couple E_ALL warnings.
+
+February 21st, 2010
+ - support_timer.module
+    o bug #670906: be sure a proper date has been entered
+    o feature #721034: add hooks to allow support_rates module to add hourly
+      rates to timer reports
+    o feature #712584: make reports accessible with a url that can be bookmarked
+      and easily shared
+    o feature #712582: allow multi-user reports
+
+December 10th, 2009 (6.x-1.0)
+ - support_timer.module
+    o Feature #656682: warn user if navigating away from ticket without saving
+      timer information.
+    o Bug #612842: don't display timer info if user doesn't have permission to
+      view it.
+    o Bug #656742: don't lose ticket summary or date when editing ticket
+ - support_timer.js
+    o Bug #656780: respect changes made to timer when timer is paused, edited,
+      then resumed
+    o Bug #512564: don't reset timer to 00:00:00 when previewing a ticket

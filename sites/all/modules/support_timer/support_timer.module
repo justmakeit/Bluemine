@@ -1,0 +1,1046 @@
+<?php
+// $Id: support_timer.module,v 1.1.2.21 2011/01/04 00:51:32 Jeremy Exp $
+
+/**
+ * @file support_timer.module
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function support_timer_menu() {
+  $items = array();
+  $items['admin/support/settings/timer'] = array(
+    'title' => 'Timer',
+    'description' => 'Configuration settings for the support timer.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('support_timer_admin'),
+    'access arguments' => array('administer support'),
+  );
+
+  $items['user/%user/user_timer_report'] = array(
+    'title' => 'User timer report',
+    'description' => 'Display a timer report for user.',
+    'page callback' => 'support_timer_user_report',
+    'page arguments' => array(1),
+    'access callback' => '_support_timer_user_report_access',
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $result = db_query('SELECT path FROM {support_client} WHERE status = 1');
+  foreach ($result as $client) {
+    $items["support/$client->path/client_timer_report"] = array(
+      'title' => 'client timer report',
+      'description' => 'Display a timer report for client.',
+      'page callback' => 'support_timer_client_report',
+      'page arguments' => array(1),
+      'access callback' => '_support_timer_client_report_access',
+      'access arguments' => array(1),
+      'weight' => 10,
+      'type' => MENU_LOCAL_TASK,
+    );
+  }
+  return $items;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function support_timer_theme() {
+  return array(
+    'support_timer_pager' => array(
+      'variables' => array('text' => NULL, 'op' => NULL, 'parameters' => array(), 'attributes' => array()),
+    ),
+  );
+}
+
+function _support_timer_user_report_access($account) {
+  global $user;
+  // Modules can override access by returning TRUE or FALSE from
+  // hook_support_timer_user_report_access.
+  $grants = module_invoke_all('support_timer_user_report_access', $account);
+  $access = FALSE;
+  foreach ($grants as $right) {
+    // Return first matching deny
+    if ($right === FALSE) {
+      return FALSE;
+    }
+    else if ($right === TRUE) {
+      $access = TRUE;
+    }
+  }
+  return $access || user_access('view all user reports') || (user_access('view own user report') && $account->uid == $user->uid);
+}
+
+function _support_timer_client_report_access($path) {
+  global $user;
+
+  // Check permissions
+  if (!user_access('view client summary') && !user_access('view client reports')) {
+    return FALSE;
+  }
+
+  $client = support_client_load($path, FALSE);
+  if (!is_object($client)) {
+    return FALSE;
+  }
+  $clients = _support_available_clients($user);
+  if (!is_array($clients) || empty($clients)) {
+    return FALSE;
+  }
+
+  // Be sure user can access client
+  if (isset($clients[$client->clid])) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function support_timer_permission() {
+  return array(
+    'view time spent' => array(
+      'title' => t('View time spent'),
+    ),
+    'edit time spent' => array(
+      'title' => t('Edit time spent'),
+    ),
+    'track time spent' => array(
+      'title' => t('Track time spent'),
+      'description' => t('Use the javascript timer to track time spent on a ticket update.'),
+    ),
+    'view own user report' => array(
+      'title' => t('View own user report'),
+    ),
+    'view all user reports' => array(
+      'title' => t('View all user reports'),
+    ),
+    'view client summary' => array(
+      'title' => t('View client summary'),
+    ),
+    'view client reports' => array(
+      'title' => t('View client reports'),
+    ),
+    'administer timer' => array(
+      'title' => t('Administer timer'),
+    ),
+  );
+}
+
+/**
+ * Make it possible to disable javascript that displays a warning if a user
+ * navigates away from a page without saving changes.
+ */
+function support_timer_admin() {
+  $form = array();
+
+  $form['support_timer_unload_warning'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Warn user if navigating away from ticket without saving timer information'),
+    '#default_value' => variable_get('support_timer_unload_warning', TRUE),
+  );
+
+  return system_settings_form($form);
+}
+
+/**
+ * Implements hook_form_comment_node_support_ticket_form_alter().
+ */
+function support_timer_form_comment_node_support_ticket_form_alter(&$form, &$form_state) {
+  $node = $form['#node'];
+  if (!empty($form['cid']['#value'])) {
+    $form = array_merge(support_timer_display_timer(array('nid' => $node->nid, 'cid' => $form['cid']['#value'])), $form);
+  }
+  else {
+    $form = array_merge(support_timer_add_timer($form_state, $form), $form);
+  }
+  $form['#validate'][] = '_support_timer_comment_validate';
+}
+
+/**
+ * Implements hook_form_support_ticket_node_form_alter().
+ */
+function support_timer_form_support_ticket_node_form_alter(&$form, &$form_state) {
+  if (!empty($form['nid']['#value'])) {
+    $form = array_merge(support_timer_display_timer(array('nid' => $form['nid']['#value'])), $form);
+  }
+  else {
+    $form = array_merge(support_timer_add_timer($form_state, $form), $form);
+  }
+}
+
+/**
+ * Implements hook_node_view().
+ */
+function support_timer_node_view($node, $view_mode, $langcode) {
+  if ($node->type == 'support_ticket' && user_access('view time spent')) {
+    $timer = db_query('SELECT time, date, summary FROM {support_ticket_timer} WHERE nid = :nid', array(':nid' => $node->nid))->fetch();
+    if (!empty($timer) && ($timer->time || $timer->date)) {
+      $date = date('d M Y', $timer->date);
+      $node->content['timer'] = array(
+        '#value' => "<div class='support-timer'><div class='time'>Time: $timer->time</div><div class='date'>Date: $date</div><div class='summary'>Summary: $timer->summary</div></div>",
+        '#weight' => 1,
+      );
+    }
+  }
+}
+
+/**
+ * Implements hook_node_load().
+ */
+function support_timer_node_load($nodes, $types) {
+  // @@@ Is this even used?
+  if (!in_array('support_ticket', $types)) {
+    return;
+  }
+  $result = db_query('SELECT nid, time, date, summary FROM {support_ticket_timer} WHERE nid IN (:nids)', array(':nids' => array_keys($nodes)));
+  foreach ($result as $timer) {
+    if ($nodes[$timer->nid]->type == 'support_ticket') {
+      $nodes[$timer->nid]->time = $timer->time;
+      $nodes[$timer->nid]->date = $timer->date;
+      $nodes[$timer->nid]->summary = $timer->summary;
+    }
+  }
+}
+
+/**
+ * Implements hook_node_validate().
+ */
+function support_timer_node_validate($node, $form, &$form_state) {
+  if ($node->type == 'support_timer') {
+    if (user_access('track time spent') || user_access('administer timer')) {
+      if ((!$date = strtotime($node->timer_date)) || $date < 1000000) {
+        form_set_error('timer_date', t('You must enter a valid date in the format %format, where dd is a two digit day, mmm is a three letter month, and yyyy is a four digit year.', array('%format' => t('dd mmm yyyy'))));
+      }
+    }
+  }
+}
+
+/**
+ * Validation function for comments.
+ */
+function _support_timer_comment_validate($form, &$form_state) {
+  if (user_access('track time spent') || user_access('administer timer')) {
+    if ((!$date = strtotime($form_state['values']['timer_date'])) || $date < 1000000) {
+      form_set_error('timer_date', t('You must enter a valid date in the format %format, where dd is a two digit day, mmm is a three letter month, and yyyy is a four digit year.', array('%format' => t('dd mmm yyyy'))));
+    }
+  }
+}
+
+/**
+ * Implements hook_node_insert().
+ */
+function support_timer_node_insert($node) {
+  return support_timer_node_update($node);
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function support_timer_node_update($node) {
+  if ($node->type == 'support_ticket') {
+    if (isset($node->timer_date) && isset($node->elapsed) && isset($node->summary)) {
+      $date = strtotime($node->timer_date);
+      db_merge('support_ticket_timer')
+        ->key(array('nid' => $node->nid))
+        ->fields(array(
+          'time' => $node->elapsed,
+          'date' => $date,
+          'summary' => $node->summary,
+        ))
+        ->execute();
+    }
+  }
+}
+
+/**
+ * Implements hook_node_delete().
+ */
+function support_timer_node_delete($node) {
+  db_delete('support_ticket_timer')
+    ->condition('nid', $node->nid)
+    ->execute();
+}
+
+/**
+ * Implements hook_comment_view().
+ */
+function support_timer_comment_view($comment, $view_mode, $langcode) {
+  if (!empty($comment->node_type) && $comment->node_type == 'comment_node_support_ticket') {
+    // Display time spent on ticket.
+    if (user_access('view time spent')) {
+      $timer = db_query('SELECT time, date, summary FROM {support_ticket_comment_timer} WHERE cid = :cid', array(':cid' => $comment->cid))->fetch();
+      if (!empty($timer) && ($timer->time || $timer->date)) {
+        $date = date('d M Y', $timer->date);
+        $comment->content['support_timer'] = array(
+          '#type' => 'markup',
+          '#weight' => -10,
+          '#markup' => "<div class='support-timer'><div class='time'>Time: $timer->time</div><div class='date'>Date: $date</div><div class='summary'>Summary: $timer->summary</div></div>",
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_comment_insert().
+ */
+function support_timer_comment_insert($comment) {
+  return support_timer_comment_update($comment);
+}
+
+/**
+ * Implements hook_comment_update().
+ */
+function support_timer_comment_update($comment) {
+  if ($comment->node_type == 'comment_node_support_ticket') {
+    if (isset($comment->timer_date) && isset($comment->elapsed) && isset($comment->summary)) {
+      $date = strtotime($comment->timer_date);
+      db_merge('support_ticket_comment_timer')
+        ->key(array('cid' => $comment->cid))
+        ->fields(array(
+          'time' => $comment->elapsed,
+          'date' => $date,
+          'summary' => $comment->summary,
+        ))
+        ->execute();
+    }
+  }
+}
+
+/**
+ * Implements hook_comment_delete().
+ */
+function support_timer_comment_delete($comment) {
+  db_delete('support_ticket_comment_timer')
+    ->condition('cid', $comment->cid)
+    ->execute();
+}
+
+/**
+ *  Display form for tracking time elapsed.
+ */
+function support_timer_add_timer(&$form_state, $edit) {
+  $form = array();
+  if (user_access('track time spent') || user_access('administer timer')) {
+    if (isset($form_state['values']['elapsed'])) {
+      $elapsed = $form_state['values']['elapsed'];
+    }
+    else if (isset($form_state['post']['elapsed'])) {
+      $elapsed = $form_state['post']['elapsed'];
+    }
+    else {
+      $elapsed = '00:00:00';
+    }
+    drupal_add_js(array('support_timer' => array('unload_warning' => variable_get('support_timer_unload_warning', TRUE), 'elapsed' => $elapsed)), 'setting');
+    drupal_add_js(drupal_get_path('module', 'support_timer'). '/support_timer.js');
+    $form['timer'] = array(
+      '#type' => 'fieldset',
+      '#prefix' => '<div class="container-inline">',
+      '#suffix' => '</div>',
+    );
+    if (!user_access('edit time spent') && !user_access('administer timer')) {
+      $attributes = array('disabled' => 'disabled');
+    }
+    else {
+      $attributes = array();
+    }
+    $visible = user_access('view time spent');
+    $form['timer']['elapsed'] = array(
+      '#type' => $visible ? 'textfield' : 'hidden',
+      '#title' => t('Time spent'),
+      '#description' => t('(hh:mm:ss)'),
+      '#size' => '8',
+      '#maxlength' => '10',
+      '#default_value' => $elapsed,
+      '#attributes' => $attributes,
+    );
+    $form['timer']['pause'] = array(
+      '#type' => $visible ? 'submit' : 'hidden',
+      '#value' => t('Pause'),
+      '#prefix' => '&nbsp;&nbsp;',
+      '#attributes' => array('onclick' => 'pause_timer(); return false;'),
+    );
+    $form['timer']['reset'] = array(
+      '#type' => $visible ? 'submit' : 'hidden',
+      '#value' => t('Reset'),
+      '#attributes' => array('onclick' => 'reset_timer(); return false;'),
+    );
+    $form['timer']['timer_date'] = array(
+      '#type' => $visible ? 'textfield' : 'hidden',
+      '#size' => '10',
+      '#maxlength' => '11',
+      '#prefix' => '&nbsp;&nbsp;',
+      '#title' => t('Date'),
+      '#description' => t('(dd mmm yyyy)'),
+      '#default_value' => date('d M Y'),
+      '#attributes' => $attributes,
+    );
+    $form['timer']['summary'] = array(
+      '#type' => $visible ? 'textfield' : 'hidden',
+      '#size' => '18',
+      '#maxlength' => '255',
+      '#prefix' => '&nbsp;&nbsp;',
+      '#title' => t('Summary'),
+      '#attributes' => $attributes,
+    );
+    // Allow other modules to modify the timer form.
+    drupal_alter('support_timer_add', $form, $edit);
+  }
+  return $form;
+}
+
+/**
+ *  Display form for displaying time elapsed.
+ */
+function support_timer_display_timer($id) {
+  $form = array();
+  if (user_access('view time spent') || user_access('edit time spent') ||
+      user_access('administer timer')) {
+    $form['timer'] = array(
+      '#type' => 'fieldset',
+      '#prefix' => '<div class="container-inline">',
+      '#suffix' => '</div>',
+    );
+    if (!user_access('edit time spent') && !user_access('administer timer')) {
+      $attributes = array('disabled' => 'disabled');
+    }
+    else {
+      $attributes = array();
+    }
+    if (isset($id['cid'])) {
+      $details = db_query('SELECT time, date, summary FROM {support_ticket_comment_timer} WHERE cid = :cid', array(':cid' => $id['cid']))->fetch();
+    }
+    else {
+      $details = db_query('SELECT time, date, summary FROM {support_ticket_timer} WHERE nid = :nid', array(':nid' => $id['nid']))->fetch();
+    }
+    $form['timer']['elapsed'] = array(
+      '#type' => 'textfield',
+      '#description' => t('time spent (hh:mm:ss)'),
+      '#size' => '8',
+      '#maxlength' => '10',
+      '#attributes' => $attributes,
+      '#default_value' => isset($details->time) ? $details->time : '',
+    );
+    $form['timer']['timer_date'] = array(
+      '#type' => 'textfield',
+      '#size' => '10',
+      '#maxlength' => '11',
+      '#prefix' => '&nbsp;&nbsp;',
+      '#title' => t('Date'),
+      '#description' => t('(dd mmm yyyy)'),
+      '#default_value' => isset($details->date) ? date('d M Y', $details->date) : date('d M Y'),
+      '#attributes' => $attributes,
+    );
+    $form['timer']['summary'] = array(
+      '#type' => 'textfield',
+      '#size' => '18',
+      '#maxlength' => '255',
+      '#prefix' => '&nbsp;&nbsp;',
+      '#title' => t('Summary'),
+      '#default_value' => isset($details->summary) ? $details->summary : '',
+      '#attributes' => $attributes,
+    );
+    // Allow other modules to modify the timer form.
+    drupal_alter('support_timer_display', $form, $id);
+  }
+  return $form;
+}
+
+/**
+ * Helper function to format date.
+ */
+function _support_timer_date_human($date) {
+  return date('Y-m-d H:i', $date);
+}
+
+/**
+ * Returns a timestamp for the first hour of the first day of the month.
+ */
+function _support_timer_first_day_of_month($time = NULL) {
+  if ($time === NULL) {
+    $time = time();
+  }
+  return strtotime(date('Ym010000', $time));
+}
+
+/**
+ * Returns a timestamp for the last hour of the last day of the month.
+ */
+function _support_timer_last_day_of_month($time = NULL) {
+  if ($time === NULL) {
+    $time = time();
+  }
+  $month = date('m', $time);
+  $year = date('Y', $time);
+  $day = date('d', mktime(0, 0, 0, ($month + 1), 0, $year));
+  return strtotime("{$year}{$month}{$day}2359");
+}
+
+function support_timer_to_hours($time) {
+  $time = explode(':', $time);
+  $hours = (int)$time[0];
+  $minutes = round((int)$time[1] / 60, 2);
+  return $hours + $minutes;
+}
+
+function support_timer_valid_time($time) {
+  $time = number_format(round($time * 4) / 4, 2);
+  if ($time < .25) {
+    return 0;
+  }
+  return $time;
+}
+
+function support_timer_clients_load($clid) {
+  static $clients = array();
+  if (!isset($clients[$clid])) {
+    $clients[$clid] = array($clid);
+    $result = db_query('SELECT clid FROM {support_client} WHERE parent = :parent AND status = 1', array(':parent' => $clid));
+    foreach ($result as $subclient) {
+      $clients[$clid][] = $subclient->clid;
+    }
+  }
+  return $clients[$clid];
+}
+
+function support_timer_client_report($path) {
+  $client = support_client_load($path, FALSE);
+  $month = isset($_GET['month']) ? _support_timer_first_day_of_month((int)$_GET['month']) : _support_timer_first_day_of_month(time());
+  drupal_set_title(t('@client, @month @year', array('@client' => $client->name, '@month' => date('F', $month), '@year' => date('Y', $month))));
+
+  // Allow report filtering by user ID.
+  $uids = isset($_GET['uid']) ? explode(',', $_GET['uid']) : '';
+  if (!empty($uids)) {
+    foreach ($uids as $key => $uid) {
+      if (!is_numeric($uid)) {
+        unset($uids[$key]);
+      }
+    }
+  }
+
+  $report = new stdClass();
+  $report->header = theme('support_timer_pager', array('text' => t('‹ previous'), 'op' => '<'));
+  $report->filters = drupal_render(drupal_get_form('support_timer_client_report_ui_form'));
+
+  $header = array(t('Day'), t('User'), t('Summary'), t('Hours'));
+  if (module_exists('support_rates')) {
+    if (user_access('view billed rates')) {
+      $header[] = t('Rate');
+      $header[] = t('Billed');
+    }
+  }
+
+  $days = date('t', $month);
+
+  // Report includes parent and all subclients
+  $clients = support_timer_clients_load($client->clid);
+
+  $rows = array();
+  $total = array();
+
+  if (module_exists('support_rates')) {
+    $month_viewed = date('Ym01', $month);
+    $result = db_query('SELECT sr.rate, sr.hours, sr.description from {support_rate} sr LEFT JOIN {support_rate_client} src ON sr.subid = src.subid WHERE sr.period = :period AND src.clid IN (:clients) AND (sr.start = 0 OR sr.start >= :timestamp) AND (sr.end = 0 OR sr.start <= :timestamp)', array(':period' => SUPPORT_RATES_MONTHLY, ':clients' => $clients, ':timestamp' => $month_viewed));
+    foreach ($result as $subscription) {
+      $row = array();
+      $row[] = date('M', $month); // Day
+      $row[] = t('Monthly'); // User
+      $row[] = $subscription->description; // Summary
+      $row[] = "($subscription->hours)"; // Hours
+      $row[] = t('$') . number_format($subscription->rate, 2); // Rate
+      $row[] = t('$') . number_format($subscription->rate, 2); // Billed
+      $total['prebilled'] += $subscription->hours;
+      $total['billed'] += $subscription->rate;
+      $rows = array($row);
+    }
+    if (isset($total['prebilled']) && !empty($total['prebilled'])) {
+      $total['summary'] .= '<br /><strong>' . t('Pre-billed hours:') .' </strong>';
+      $total['summary'] .= number_format($total['prebilled'], 2) .'<br />';
+    }
+  }
+
+  for ($i = 0; $i < $days; $i++) {
+    $date = $month + 86400 * $i;
+    $hours = array();
+    $query = db_select('support_ticket_timer', 'tt');
+    $query->leftJoin('support_ticket', 't', 'tt.nid = t.nid');
+    $query->leftJoin('node', 'n', 't.nid = n.nid');
+    $query->fields('tt', array('time', 'summary'));
+    $query->addField('t', 'client', 'clid');
+    $query->fields('n', array('uid', 'nid'));
+    $query->condition('tt.date', $date, '<=');
+    $query->condition('tt.date', ($date - 86400), '>');
+    $query->condition('t.client', $clients, 'IN');
+    $query->addTag('support_timer');
+    $query->addTag('support_timer_node');
+
+    if (!empty($uids)) {
+      $query->condition('n.uid', $uids, 'IN');
+    }
+
+    $result = $query->execute();
+    foreach ($result as $timer) {
+      if ($timer->uid) {
+        $time = support_timer_to_hours($timer->time);
+        if (function_exists('support_rates_load_rate')) {
+          $rate = support_rates_load_rate('node', $timer->nid);
+        }
+        else {
+          $rate = 0;
+        }
+        if ($time) {
+          if (empty($timer->summary)) {
+            $summary = '[-]';
+          }
+          else {
+            $summary = $timer->summary;
+          }
+          $hours[$timer->uid]["$rate"]->summary[] = $summary;
+          $hours[$timer->uid]["$rate"]->link[] = "node/$timer->nid";
+          $hours[$timer->uid]["$rate"]->fragment[] = '';
+          $hours[$timer->uid]["$rate"]->time += $time;
+          $hours[$timer->uid]["$rate"]->clid = $timer->clid;
+        }
+      }
+    }
+    $query = db_select('support_ticket_comment_timer', 'tt');
+    $query->leftJoin('support_ticket_comment', 't', 'tt.cid = t.cid');
+    $query->leftJoin('comment', 'c', 't.cid = c.cid');
+    $query->fields('tt', array('time', 'summary'));
+    $query->addField('t', 'client', 'clid');
+    $query->fields('c', array('uid', 'nid', 'cid'));
+    $query->condition('tt.date', $date, '<=');
+    $query->condition('tt.date', ($date - 86400), '>');
+    $query->condition('t.client', $clients, 'IN');
+    $query->addTag('support_timer');
+    $query->addTag('support_timer_comment');
+
+    if (!empty($uids)) {
+      $query->condition('c.uid', $uids, 'IN');
+    }
+
+    $result = $query->execute();
+    foreach ($result as $timer) {
+      if ($timer->uid) {
+        $time = support_timer_to_hours($timer->time);
+        if (function_exists('support_rates_load_rate')) {
+          $rate = support_rates_load_rate('comment', $timer->cid);
+        }
+        else {
+          $rate = 0;
+        }
+        if ($time) {
+          if (empty($timer->summary)) {
+            $summary = '[-]';
+          }
+          else {
+            $summary = $timer->summary;
+          }
+          $hours[$timer->uid]["$rate"]->summary[] = $summary;
+          $hours[$timer->uid]["$rate"]->link[] = "node/$timer->nid";
+          $hours[$timer->uid]["$rate"]->fragment[] = "comment-$timer->cid";
+          $hours[$timer->uid]["$rate"]->time += $time;
+          $hours[$timer->uid]["$rate"]->clid = $timer->clid;
+        }
+      }
+    }
+    $first = TRUE;
+    foreach ($hours as $uid => $rates) {
+      foreach ($rates as $rate => $detail) {
+        if ($time = support_timer_valid_time($detail->time)) {
+          $account = user_load($uid);
+          $row = array();
+          if ($first) {
+            $row[] = date('M j', $date);
+            $first = FALSE;
+          }
+          else {
+            $row[] = '';
+          }
+          $row[] = $account->name;
+          $summary = '';
+          if ($client->clid != $detail->clid) {
+            $subclient = support_client_load($detail->clid);
+            $subclient_name = t('!subclient: ', array('!subclient' => check_plain($subclient->name)));
+          }
+          else {
+            $subclient = $subclient_name = NULL;
+          }
+          if (is_array($detail->summary)) {
+            foreach ($detail->summary as $key => $value) {
+              if (!empty($summary)) {
+                $summary .= '; ';
+              }
+              else if (isset($subclient_name)) {
+                $summary = $subclient_name;
+              }
+              $summary .= l($value, $detail->link[$key], array('fragment' => $detail->fragment[$key]));
+            }
+          }
+          $row[] = $summary;
+          if (!isset($total['time'])) {
+            $total['time'] = 0;
+          }
+          $total['time'] += $time;
+          if (module_exists('support_rates')) {
+            if (user_access('view billed rates')) {
+              if (!empty($total['prebilled'])) {
+                if ($time <= $total['prebilled']) {
+                  $billed = 0;
+                  $total['prebilled'] -= $time;
+                  $prepend = '(';
+                  $append = ') 0';
+                }
+                else {
+                  $hours = $time - $total['prebilled'];
+                  $billed = $rate * $hours;
+                  $total['prebilled'] = 0;
+                  $prepend = '(';
+                  $append = ") $hours";
+                }
+              }
+              else {
+                $billed = $rate * $time;
+                $prepend = $append = '';
+              }
+              $row[] = $prepend . $time . $append;
+              $row[] = '$' . number_format($rate, 2);
+              $row[] = '$' . number_format($billed, 2);
+              if (!isset($total['billed'])) {
+                $total['billed'] = 0;
+              }
+              $total['billed'] += $billed;
+            }
+          }
+          else {
+            $row[] = $time;
+          }
+          $rows[] = $row;
+        }
+      }
+    }
+  }
+
+  if (user_access('view client summary')) {
+    $report->summary = '<p><p><strong>' . t('Hours:') .' </strong>';
+    $report->summary .= isset($total['time']) ? number_format($total['time'], 2) : '0.00';
+    $report->summary .= '<br />';
+    $report->summary .= '<strong>' . t('Total:') .' </strong>';
+    $report->summary .= isset($total['billed']) ? '$' . number_format($total['billed'], 2) : '$0.00';
+    if (isset($total['summary'])) {
+      $report->summary .= $total['summary'];
+    }
+    $report->summary .= '</p>';
+  }
+  else {
+    $report->summary = '';
+  }
+
+  if (user_access('view client reports')) {
+    if (!empty($total)) {
+      $row = array('<strong>' . t('Total') . '</strong>', '', '');
+      $row[] = isset($total['time']) ? number_format($total['time'], 2) : '0.00';
+      if (module_exists('support_rates')) {
+        if (user_access('view billed rates')) {
+          $row[] = '';
+          $row[] = isset($total['billed']) ? '$' . number_format($total['billed'], 2) : '$0.00';
+        }
+      }
+      $rows[] = $row;
+    }
+    $report->body .= theme('table', array('header' => $header, 'rows' => $rows));
+  }
+  $report->footer = theme('support_timer_pager', array('text' => t('next ›'), 'op' => '>'));
+  drupal_alter('support_timer_client_report', $report);
+
+  return $report->header . $report->filters . $report->summary .  $report->body . $report->footer;
+}
+
+function support_timer_client_report_ui_form($form, &$form_state) {
+  $uid = isset($_GET['uid']) ? preg_replace('/[^0-9,]/', '', $_GET['uid']) : '';
+  $uids = explode(',', $uid);
+
+  $form['user'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Users'),
+    '#collapsible' => TRUE,
+    '#collapsed' => empty($uids[0]) ? TRUE : FALSE,
+  );
+
+  $users = array('-- all users --') + support_timer_client_users();
+  $size = count($users);
+  if ($size < 5) {
+    $size = 5;
+  }
+  else if ($size > 15) {
+    $size = 15;
+  }
+  $form['user']['users']= array(
+    '#title' => t('Users'),
+    '#type' => 'select',
+    '#multiple' => TRUE,
+    '#options' => $users,
+    '#size' => $size,
+    '#default_value' => $uids,
+    '#description' => t('Filter report by selected project.'),
+  );
+
+  $form['user']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Update filter'),
+  );
+
+  return $form;
+}
+
+function support_timer_client_report_ui_form_submit($form, &$form_state) {
+  $uids = array();
+  if (!empty($form_state['values']['users']) && is_array($form_state['values']['users'])) {
+    foreach ($form_state['values']['users'] as $uid) {
+      if ((int)$uid) {
+        $uids[$uid] = (int)$uid;
+      }
+    }
+  }
+  $path = drupal_get_path_alias(isset($_GET['q']) ? $_GET['q'] : '');
+  $query = array();
+  foreach ($_GET as $key => $value) {
+    if (!in_array($key, array('q', 'uid'))) {
+      $query[$key] = $value;
+    }
+  }
+  if (!empty($uids)) {
+    $query['uid'] = implode(',', $uids);
+  }
+  drupal_goto($path, array('query' => $query));
+}
+
+/**
+ * List all users that can track time against current client.
+ */
+function support_timer_client_users() {
+  $node = new stdClass();
+  $node->client = _support_current_client();
+  $all_users = _support_assigned(0, $node);
+  $users = array();
+  foreach ($all_users as $uid => $name) {
+    $account = user_load($uid);
+    if (user_access('track time spent', $account) || user_access('administer timer', $account)) {
+      $users[$uid] = $account->name;
+    }
+  }
+  return $users;
+}
+
+/**
+ *
+ */
+function support_timer_user_report($account) {
+  $month = isset($_GET['month']) ? _support_timer_first_day_of_month((int)$_GET['month']) : _support_timer_first_day_of_month(time());
+  drupal_set_title(t('@user, @month @year', array('@user' => $account->name, '@month' => date('F', $month), '@year' => date('Y', $month))));
+
+  $report = new stdClass();
+  $report->header = theme('support_timer_pager', array('text' => t('‹ previous'), 'op' => '<'));
+  // @todo: add filters like the client_report
+  $report->filters = '';
+
+  $header = array(t('Day'), t('Client'), t('Summary'), t('Hours'));
+  if (module_exists('support_rates')) {
+    if (user_access('view billed rates')) {
+      $header[] = t('Rate');
+      $header[] = t('Billed');
+    }
+    if (user_access('view earning rates')) {
+      $header[] = t('Earned');
+    }
+  }
+
+  $days = date('t', $month);
+
+  $rows = array();
+  $total = array();
+  for ($i = 0; $i < $days; $i++) {
+    $date = $month + 86400 * $i;
+    $hours = array();
+    $result = db_query('SELECT tt.time, tt.summary, t.client, n.uid, n.nid FROM {support_ticket_timer} tt LEFT JOIN {support_ticket} t ON tt.nid = t.nid LEFT JOIN {node} n ON t.nid = n.nid WHERE tt.date <= :end AND tt.date > :start AND n.uid = :uid', array(':end' => $date, ':start' => ($date - 86400), ':uid' => $account->uid));
+    foreach ($result as $timer) {
+      if ($timer->client) {
+        $time = support_timer_to_hours($timer->time);
+        if (function_exists('support_rates_load_rate')) {
+          $rate = support_rates_load_rate('node', $timer->nid);
+        }
+        else {
+          $rate = 0;
+        }
+        if ($time) {
+          if (empty($timer->summary)) {
+            $summary = '[-]';
+          }
+          else {
+            $summary = $timer->summary;
+          }
+          $hours[$timer->client]["$rate"]->summary[] = $summary;
+          $hours[$timer->client]["$rate"]->link[] = "node/$timer->nid";
+          $hours[$timer->client]["$rate"]->fragment[] = '';
+          $hours[$timer->client]["$rate"]->time += $time;
+        }
+      }
+    }
+    $result = db_query('SELECT tt.time, tt.summary, t.client, c.uid, c.nid, c.cid FROM {support_ticket_comment_timer} tt LEFT JOIN {support_ticket_comment} t ON tt.cid = t.cid LEFT JOIN {comment} c ON t.cid = c.cid WHERE tt.date <= :end AND tt.date > :start AND c.uid = :uid', array(':end' => $date, ':start' => ($date - 86400), ':uid' => $account->uid));
+    foreach ($result as $timer) {
+      if ($timer->client) {
+        $time = support_timer_to_hours($timer->time);
+        if (function_exists('support_rates_load_rate')) {
+          $rate = support_rates_load_rate('comment', $timer->cid);
+        }
+        else {
+          $rate = 0;
+        }
+        if ($time) {
+          if (empty($timer->summary)) {
+            $summary = '[-]';
+          }
+          else {
+            $summary = $timer->summary;
+          }
+          $hours[$timer->client]["$rate"]->summary[] = $summary;
+          $hours[$timer->client]["$rate"]->link[] = "node/$timer->nid";
+          $hours[$timer->client]["$rate"]->fragment[] = "comment-$timer->cid";
+          $hours[$timer->client]["$rate"]->time += $time;
+        }
+      }
+    }
+    $first = TRUE;
+    foreach ($hours as $clid => $rates) {
+      foreach ($rates as $rate => $detail) {
+        if ($time = support_timer_valid_time($detail->time)) {
+          $client = support_client_load($clid);
+          $row = array();
+          if ($first) {
+            $row[] = date('M j', $date);
+            $first = FALSE;
+          }
+          else {
+            $row[] = '';
+          }
+          if ($client->parent) {
+            $prepend = "$client->name: ";
+            $subclient = support_client_load($client->parent);
+            $row[] = $subclient->name;
+          }
+          else {
+            $prepend = '';
+            $subclient = NULL;
+            $row[] = $client->name;
+          }
+          $summary = '';
+          if (is_array($detail->summary)) {
+            foreach ($detail->summary as $key => $value) {
+              if (!empty($summary)) {
+                $summary .= '; ';
+              }
+              else if (!empty($prepend)) {
+                $summary = $prepend;
+              }
+              $summary .= l($value, $detail->link[$key], array('fragment' => $detail->fragment[$key]));
+            }
+          }
+          $row[] = $summary;
+          $row[] = $time;
+          $total['time'] += $time;
+          if (module_exists('support_rates')) {
+            if (user_access('view billed rates')) {
+              $billed = $rate * $time;
+              $row[] = '$' . number_format($rate, 2);
+              $row[] = '$' . number_format($billed, 2);
+              $total['billed'] += $billed;
+            }
+            if (user_access('view earning rates')) {
+              $earned = support_rates_earned($account, $client, $rate, $time, $month);
+              $row[] = '$' . number_format($earned, 2);
+              $total['earned'] += $earned;
+            }
+          }
+          $rows[] = $row;
+        }
+      }
+    }
+  }
+
+  if (!empty($total)) {
+    $row = array('<strong>' . t('Total') . '</strong>', '', '');
+    $row[] = isset($total['time']) ? number_format($total['time'], 2) : '0.00';
+    if (module_exists('support_rates')) {
+      if (user_access('view billed rates')) {
+        $row[] = '';
+        $row[] = isset($total['billed']) ? '$' . number_format($total['billed'], 2) : '$0.00';
+      }
+      if (user_access('view earning rates')) {
+        $row[] = isset($total['earned']) ? '$' . number_format($total['earned'], 2) : '$0.00';
+      }
+    }
+    $rows[] = $row;
+  }
+  // @todo: add a summary, like the client_report
+  $report->summary = '';
+  $report->body = theme('table', array('header' => $header, 'rows' => $rows));
+  $report->footer = theme('support_timer_pager', array('text' => t('next ›'), 'op' => '>'));
+
+  drupal_alter('support_timer_user_report', $report);
+
+  return $report->header . $report->filters . $report->summary . $report->body . $report->footer;
+}
+
+function theme_support_timer_pager($variables) {
+  $text = $variables['text'];
+  $op = $variables['op'];
+  $parameters = $variables['parameters'];
+  $attributes = $variables['attributes'];
+  $month = isset($_GET['month']) ? _support_timer_first_day_of_month((int)$_GET['month']) : _support_timer_first_day_of_month(time());
+  $prepend = $append = '';
+  switch ($op) {
+    case '<':
+      $month -= 86400 * 1;
+      $prepend = '‹ ';
+      break;
+    case '>':
+      $month += 86400 * 32;
+      $append = ' ›';
+      break;
+    default:
+      $append = '';
+      $prepend = '';
+      break;
+  }
+  $text = t('@prepend@month@append', array('@prepend' => $prepend, '@month' => format_date($month, 'custom', 'F Y'), '@append' => $append));
+
+  $query = array();
+  if (!isset($parameters['month'])) {
+    $parameters['month'] = $month;
+  }
+  if (!isset($attributes['title'])) {
+    $attributes['title'] = t('View invoice for @month', array('@month' => format_date($month, 'custom', 'F Y')));
+  }
+
+  return l($text, $_GET['q'], array('attributes' => $attributes, 'query' => $parameters));
+}
+
+/**
+ * Time tracking updates via support_mailcmd.
+ */
+function support_timer_support_mailcmd_command_alter(&$message, $context) {
+  $client = $context['client'];
+  $account = $context['account'];
+  $commands = $context['commands'];
+  if (isset($commands['timer_date']) && isset($commands['elapsed'])) {
+    if (user_access('track time spent', $account) || user_access('administer timer', $account)) {
+      // The fields will appear either on $node or $comment automatically.
+      $message['_support_extra_fields']['timer_date'] = trim($commands['timer_date']);
+      $message['_support_extra_fields']['elapsed'] = trim($commands['elapsed']);
+      $message['_support_extra_fields']['summary'] = isset($commands['summary']) ? trim($commands['summary']) : '';
+    }
+  }
+}

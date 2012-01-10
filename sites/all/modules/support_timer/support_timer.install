@@ -1,0 +1,140 @@
+<?php
+
+/**
+ * Track how long ticket updates take.
+ * Copyright (c) 2009 Tag1 Consulting, Inc <jeremy@tag1consulting.com>.
+ */
+
+/**
+ * Support database schema definition.
+ */
+function support_timer_schema() {
+  $schema['support_ticket_timer'] = array(
+    'description' => 'Stores timer information about support tickets.',
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'time' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'date' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'summary' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    ),
+    'primary key' => array('nid'),
+  );
+
+  $schema['support_ticket_comment_timer'] = array(
+    'description' => 'Stores timer information about support ticket comments.',
+    'fields' => array(
+      'cid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+        'default' => 0,
+      ),
+      'time' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'date' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'summary' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    ),
+    'primary key' => array('cid'),
+  );
+
+  return $schema;
+}
+
+/**
+ * Add fields for tracking when a ticket was updated, and a summary of what was
+ * done.
+ */
+function support_timer_update_6001() {
+  db_add_field('support_ticket_timer', 'date',
+    array(
+      'type' => 'int',
+      'unsigned' => TRUE,
+      'not null' => TRUE,
+      'default' => 0,
+    ));
+  db_add_field('support_ticket_timer', 'summary',
+    array(
+      'type' => 'varchar',
+      'length' => 255,
+      'not null' => TRUE,
+      'default' => '',
+    ));
+  db_add_field('support_ticket_comment_timer', 'date',
+    array(
+      'type' => 'int',
+      'unsigned' => TRUE,
+      'not null' => TRUE,
+      'default' => 0,
+    ));
+  db_add_field('support_ticket_comment_timer', 'summary',
+    array(
+      'type' => 'varchar',
+      'length' => 255,
+      'not null' => TRUE,
+      'default' => '',
+    ));
+}
+
+/**
+ * Rebuild the menu.
+ */
+function support_timer_update_6002() {
+  menu_rebuild();
+}
+
+/**
+ * Rebuild the menu.
+ */
+function support_timer_update_6003() {
+  menu_rebuild();
+}
+
+/**
+ * Clean up spurious timer entries.
+ */
+function support_timer_update_6004() {
+  db_delete('support_ticket_timer')
+    ->condition('time', '')
+    ->condition('date', 0)
+    ->condition('summary', '')
+    ->execute();
+  db_delete('support_ticket_comment_timer')
+    ->condition('time', '')
+    ->condition('date', 0)
+    ->condition('summary', '')
+    ->execute();
+}
