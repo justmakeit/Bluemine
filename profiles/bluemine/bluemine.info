@@ -1,0 +1,9 @@
+name = Bluemine
+description = Project Management
+version = VERSION
+core = 7.x
+dependencies[] = block
+dependencies[] = dblog
+files[] = bluemine.profile
+
+
