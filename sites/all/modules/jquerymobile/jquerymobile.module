@@ -1,0 +1,153 @@
+<?php
+// $Idambuzz$
+
+/** @file
+ * Provides the jQuery Mobile library to modules and themes that request it.
+ *
+ * much here is patterned from jquery_ui.module
+ */
+
+/**
+ * Path to jQuery Mobile library.
+ *
+ * During site installation, JQUERY_UI_PATH is the absolute path to the
+ * jQuery UI library.  At all other times JQUERY_UI_PATH is relative, and
+ * safe for use in URLs.
+ */
+if (defined('MAINTENANCE_MODE') && MAINTENANCE_MODE == 'install') {
+  define('JQUERYMOBILE_PATH', dirname(__FILE__) . '/jquerymobile');
+}
+else {
+  define('JQUERYMOBILE_PATH', drupal_get_path('module', 'jquerymobile') . '/jquerymobile');
+}
+
+/**
+ * Add the library to the page
+ */
+function jquerymobile_add() {
+  $loaded_files = &drupal_static(__FUNCTION__);
+  if (!$loaded_files) {
+    $jquerymobile_path = JQUERYMOBILE_PATH;
+    $current_version = variable_get('jquerymobile_current_version', '1.0a3');
+    $compression = variable_get('jquerymobile_compression_type', '');
+    // this happens first; we need the option to override jqm default settings
+    drupal_add_js(drupal_get_path('module', 'jquerymobile') . '/js/jquerymobile_settings.js', array('group' => JS_LIBRARY));
+    drupal_add_js($jquerymobile_path . '/jquery.mobile-' . $current_version . (!empty($compression) ? "." . $compression : '') . ".js", array('group' => JS_LIBRARY));
+    drupal_add_css($jquerymobile_path . '/jquery.mobile-' . $current_version . (!empty($compression) ? "." . $compression : '') . ".css", array('group' => CSS_DEFAULT));
+    // mark files as added
+    jquerymobile_is_added(TRUE);
+  }
+}
+
+/**
+ * Track that jQM has been added to the page
+ */
+function jquerymobile_is_added($added = NULL) {
+  $is_added = &drupal_static(__FUNCTION__);
+  if (!$is_added && $added) {
+    $is_added = TRUE;
+  }
+  return $is_added;
+}
+
+/**
+ * Implements hook_element_info_alter().
+ */
+function jquerymobile_element_info_alter(&$type) {
+  // add a custom pre_render function to checkboxes elements
+  if (isset($type['checkboxes']['#pre_render'])) {
+    $type['checkboxes']['#pre_render'][] = 'jquerymobile_pre_render_checkboxes';
+  }
+  else {
+    $type['checkboxes']['#pre_render'] = array('jquerymobile_pre_render_checkboxes');
+  }
+
+  // add default #multiple value to checkboxes as false
+  if (!isset($type['checkbox']['#multiple'])) {
+    $type['checkbox']['#multiple'] = FALSE;
+  }
+
+  // add a new process function to actions type
+  // add a custom pre_render function to checkboxes elements
+  if (isset($type['actions']['#process'])) {
+    $type['actions']['#process'][] = 'jquerymobile_process_actions';
+  }
+  else {
+    $type['actions']['#process'] = array('jquerymobile_process_actions');
+  }
+
+  if (isset($type['text_format'])) {
+    $type['text_format']['#process'][] = 'jquerymobile_process_text_format';
+  }
+}
+
+/**
+ * Implementation of hook_js_alter()
+ * @todo some of these (user.js) in particular might want to be included
+ * user.js is dis-included because of unresolved issues between Drupal.settings and jQM
+ */
+function jquerymobile_js_alter(&$javascript) {
+  if (jquerymobile_is_added()) {
+    $suppress = array('misc/autocomplete.js', 'misc/textarea.js', 'modules/filter/filter.js', 'misc/collapse.js', 'modules/user/user.js');
+    foreach ($javascript as $idx => $val) {
+      if (in_array($idx, $suppress)) {
+        unset($javascript[$idx]);
+      }
+    }
+  }
+}
+
+/**
+ * custom pre_render function for checkboxes
+ * if a checkboxes element has only 1 option, leave it alone;
+ * otherwise mark it as multiple so that we leave it alone when 
+ * transforming single-value checkboxes to slide switches
+ */
+function jquerymobile_pre_render_checkboxes($element) {
+  $count = count($element['#options']);
+  if (count($element['#options']) != 1) {
+    foreach ($element['#options'] as $key => $choice) {
+      $element[$key]['#multiple'] = TRUE;
+    }
+  }
+  
+  return $element;
+}
+
+
+/**
+ * custom processing for form actions
+ * set them up as a jqm grid
+ * @todo need to be able to turn this on/off (per action set?)
+ */
+function jquerymobile_process_actions($element) {
+  $number_letters = array(1 => 'a', 2 => 'b', 3 => 'c', 4 => 'd', 5 => 'e');
+  $children = element_children($element);
+  $count = count($children) - 1;
+  if ($count) {
+    $element['#attributes']['class'][] = 'ui-grid-' . $number_letters[$count];
+    $grid_block_count = 1;
+    foreach ($children as $key) {
+      $element[$key]['#prefix'] = '<div class="ui-block-' . $number_letters[$grid_block_count] . '">';
+      $element[$key]['#suffix'] = '</div>';
+      $grid_block_count++;
+    }
+  }
+
+  return $element;
+}
+
+/**
+ * re-work the structure of the text_format type so it can be collapsed
+ * also drop the help link to the bottom and remove the title of the format element since it's now in the #prefix
+ *
+ */
+function jquerymobile_process_text_format($element) {
+  $element['format']['#prefix'] = '<div data-role="collapsible" data-collapsed="true"><h3>' . t('Text Format') . '</h3>';
+  $element['format']['#suffix'] = '</div>';
+  $element['format']['help']['#weight'] = 100;
+  // remove element title since it is added above
+  $element['format']['format']['#title'] = NULL;
+
+  return $element;
+}

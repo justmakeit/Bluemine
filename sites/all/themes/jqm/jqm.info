@@ -1,0 +1,60 @@
+core = 7.x
+description = Mobile theme, utilizing the jQuery Mobile web presentation framework. Note: this theme requires the jQuery Mobile module to function correctly. http://drupal.org/projects/jquerymobile 
+engine = phptemplate
+name = jQM
+
+; Regions =====================================================================
+
+regions[content] = Content
+regions[content_bottom] = Content Bottom
+regions[header] = Header
+regions[footer] = Footer
+
+
+; Style ==================================
+;
+; Note that the theme is required to call jquerymobile_add() to load the style.
+;
+; The following remove pretty much all drupal styles.
+stylesheets[all][] = comment.css
+stylesheets[all][] = contextual.css
+stylesheets[all][] = field.css
+stylesheets[all][] = node.css
+stylesheets[all][] = search.css
+stylesheets[all][] = system.admin.css
+stylesheets[all][] = system.base.css
+stylesheets[all][] = system.menus.css
+stylesheets[all][] = system.messages.css
+stylesheets[all][] = system.theme.css
+stylesheets[all][] = user.css
+stylesheets[all][] = filter.css
+
+; resets borrowed from Tao http://drupal.org/project/tao
+stylesheets[all][] = css/reset.css
+stylesheets[all][] = css/base.css
+stylesheets[screen][] = css/drupal.css
+
+stylesheets[screen][] = css/jqm.css
+
+
+; Scripts ================================
+;
+; Note that the theme is required to call jquerymobile_add() to load the library.
+
+
+
+; Settings ===============================
+settings[jqm_page_data_theme] = b
+settings[jqm_content_data_theme] = d
+settings[jqm_listview_data_theme] = a
+settings[jqm_checkbox_data_theme] = d
+settings[jqm_radio_data_theme] = d
+settings[jqm_radios_data_theme] = d
+settings[jqm_select_data_theme] = d
+
+; Information added by drupal.org packaging script on 2011-03-17
+version = "7.x-1.x-dev"
+core = "7.x"
+project = "jqm"
+datestamp = "1300320631"
+

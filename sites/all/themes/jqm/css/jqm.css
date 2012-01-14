@@ -1,0 +1,132 @@
+/* element style */
+p {
+  margin-bottom: 1em;
+}
+h2 {
+  font-size: 120%;
+}
+
+
+/* basic class styles */
+.description {
+  font-size: 13px;
+}
+div.messages {
+  padding: .4em;
+  margin-bottom: 1em;
+}
+div.messages.status {
+  background-color: #FFFFFF;
+}
+
+/* form element style */
+/* in these cases the resets are actually not something we want */
+.form-item {
+  margin: 0 0 1em 0;
+}
+.form-type-radios .form-item {
+  margin: 0;
+}
+.form-item label.option {
+  display: block;
+  font-weight: 700;
+}
+
+/* additional formatting for wider screens */
+.min-width-480px .description {
+  padding-left: .4em;
+  margin-left: 22%;
+  width: 60%;
+}
+
+
+
+/* collapsible region style */
+.ui-collapsible-contain {
+  background-color: #FFFFFF;
+  padding: 0 8px 0 0;
+}
+
+/* region style */
+.region-content-bottom {
+  margin-top: 3em;
+  background-color: #FFFFFF;
+  padding: 1em;
+}
+.region-content-bottom h2 {
+  font-size: 150%;
+  text-align: center;
+}
+.region-content .content .content {
+  padding-bottom: 1em;
+  margin-bottom: 1em;
+  border-bottom: 1px solid #BBBBBB;
+}
+
+/* node style */
+.field-name-field-image .field-item {
+  text-align: center;
+}
+.field-name-field-image img {
+  margin: 5px auto;
+  max-width: 100%;
+}
+
+.field-name-field-tags {
+  overflow: hidden;
+}
+
+.field-name-field-tags .field-label, .field-name-field-tags .field-item {
+  float: left;
+  margin-right: 1em;
+}
+
+/* comment form style */
+.comment-wrapper {
+  padding: 1em;
+  background-color: #EEEEEE;
+  margin-top: 1em;
+}
+h2.title.comment-form {
+  padding: .5em 0;
+  text-align: center;
+  font-size: 140%;
+}
+.comment-form div.form-item {
+  margin-bottom: 10px;
+}
+.comment-form .form-type-item label {
+  display: inline-block;
+  font-size: 16px;
+  font-weight: normal;
+  line-height: 1.4;
+  margin: 0 0 0.3em;
+  font-weight: 700;
+  width: 40%;
+}
+.filter-guidelines-item {
+  margin-bottom: .5em;
+}
+
+/* comment style */
+.comment {
+  margin: 2px;
+  background-color: #FFF;
+  padding: 5px;
+}
+.comment .user-picture {
+  float: left;
+  margin: 0 10px 10px 0;
+}
+.indented {
+  margin-left: 12px;
+}
+.indented .comment {
+  background-color: #F9F9F9;
+}
+.region-content .content .comment .content {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+

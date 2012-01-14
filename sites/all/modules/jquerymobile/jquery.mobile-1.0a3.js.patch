@@ -1,0 +1,91 @@
+--- jquerymobile/jquery.mobile-1.0a3.js	2011-03-06 18:59:13.000000000 -0600
++++ jquerymobile/jquery.mobile-1.0a3.js.patched	2011-03-06 19:26:06.000000000 -0600
+@@ -15,6 +15,10 @@
+  *
+  * http://docs.jquery.com/UI/Widget
+  */
++/*
++ * This file has been patched from jQuery Mobile v1.0a3 
++ * for use with Drupal's jQueryMobile module. 
++ */
+ (function( $, undefined ) {
+ 
+ // jQuery 1.4+
+@@ -1787,6 +1791,9 @@ $.widget( "mobile.page", $.mobile.widget
+ 		else{
+ 			// defer execution for consistency between webkit/non webkit
+ 			setTimeout(callback, 0);
++			// Tim Cosgrove: patched
++			// need to return jQuery object so this method chains for non-webkit
++			return $(this);
+ 		}
+ 	};
+ 
+@@ -2107,6 +2114,19 @@ $.widget( "mobile.page", $.mobile.widget
+ 						});
+ 					}
+ 
++					// Tim Cosgrove: patched
++					// Find any external script and style resources in the AJAX-loaded HTML;
++					// use $.resourceFilter() to keep only what hasn't been loaded
++					// remove external script and style resources from the variable that's about to be appended to page
++					// then append our filtered resources to that variable
++					var resources = all.find('script[src], style:contains("@import")').resourceFilter();
++					to.find('script[src], style:contains("@import")').remove();          
++					resources.appendTo( to );
++
++					// @todo; some of the drupal behaviors fail here.
++					Drupal.attachBehaviors(to[0], Drupal.settings);
++					// end patch
++
+ 					//append to page and enhance
+ 					to
+ 						.attr( "data-url", fileUrl )
+@@ -2218,7 +2238,9 @@ $.widget( "mobile.page", $.mobile.widget
+ 
+ 			//deliberately redirect, in case click was triggered
+ 			if( hasTarget ){
+-				window.open( url );
++				// Tim Cosgrove: patched
++				// do not redirect; this is no better or worse than launching a new window on target="_self"
++				location.href = url ;
+ 			}
+ 			else if( hasAjaxDisabled ){
+ 			  return;
+@@ -4490,3 +4512,36 @@ $.fn.grid = function(options){
+ };
+ })(jQuery);
+ 
++
++// Tim Cosgrove: patched
++// only allow an external JS or CSS file to be loaded once per page, based on path
++// returns scripts that should actually be loaded
++(function( $, undefined ) {
++ 	$.fn.resourceFilter = function() {
++		var data = jQuery.data(document.body) || {},
++		cssTest = /@import.*?"(.*?)"/;
++		return this.filter(function() {
++			var key;
++			if ($(this).attr('src')) {
++				key = $(this).attr('src');
++			}
++			else if ($(this).html().indexOf('import')) {
++				key = $(this).html().match(cssTest)[1];
++			}
++			var index = key.indexOf('?');
++			if (index != -1) {
++				key = key.substr(0, index);
++			}
++			if (!data[key]) {
++				data[key] = this;
++				return true;
++			}
++			return false;
++		});
++	}
++})(jQuery);
++
++// inital call to resource filter on the page when loaded
++jQuery(document).ready(function() {
++	jQuery('script[src], style:contains("@import")').resourceFilter();
++});

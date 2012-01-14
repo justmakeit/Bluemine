@@ -1,0 +1,10 @@
+name = jQueryMobile
+description = "Installs jQuery Mobile library and provides alterations to core behavior to facilitate use of jQM with Drupal."
+version = VERSION
+core = 7.x
+; Information added by drupal.org packaging script on 2011-03-17
+version = "7.x-1.x-dev"
+core = "7.x"
+project = "jquerymobile"
+datestamp = "1300320634"
+
