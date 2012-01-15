@@ -1,0 +1,64 @@
+<?php
+
+/**
+ * @file
+ */
+
+/**
+ * Implements hook_init().
+ */
+function views_tooltip_init() {
+  drupal_add_css(drupal_get_path('module', 'views_tooltip') .'/views_tooltip.css');
+}
+
+/**
+ * Implements hook_enable().
+ *
+ * Configures tipsy.
+ */
+function views_tooltip_enable() {
+  $settings = _tipsy_get_settings();
+  $settings['custom_selectors']['views_tooltip'] = array(
+    'selector' => '.views-tooltip',
+    'options' => array(
+      'fade' => 1,
+      'gravity' => 'autoNS',
+      'delayIn' => 0,
+      'delayOut' => 0,
+      'trigger' => 'hover',
+      'opacity' => '0.8',
+      'offset' => 0,
+      'html' => 1,
+      'title' => 'tooltip-content',
+    ),
+  );
+  variable_set('tipsy', $settings);
+}
+
+/**
+ * Implements hook_theme().
+ */
+function views_tooltip_theme($existing, $type, $theme, $path) {
+  return array(
+    'views_tooltip' => array(
+      'variables' => array('tooltip' => NULL, 'content' => NULL),
+    ),
+  );
+}
+
+/**
+ * Implements hook_views_api().
+ */
+function views_tooltip_views_api() {
+  return array(
+    'api' => 3,
+  );
+}
+
+function theme_views_tooltip($variables) {
+  $output = '<div class="views-tooltip">';
+  $output .= '<div class="tooltip-content">' . filter_xss_admin($variables['tooltip']) . '</div>';
+  $output .= filter_xss_admin($variables['content']);
+  $output .= '</div>';
+  return $output;
+}

@@ -1,0 +1,19 @@
+name = CRM Core
+description = Drupal CRM basic functionality
+package = CRM
+version = VERSION
+core = 7.x
+
+; =======================
+; Module Files
+; =======================
+
+; Test
+files[] = tests/crm_base.test
+
+; Information added by drupal.org packaging script on 2011-12-29
+version = "7.x-1.x-dev"
+core = "7.x"
+project = "crm_core"
+datestamp = "1325117532"
+
